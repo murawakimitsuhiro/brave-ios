@@ -614,6 +614,14 @@ class Tab: NSObject {
           ActivityShortcutManager.shared.donateCustomIntent(for: .openWebsite, with: url.absoluteString)
         }
       }
+        
+        // 15時より前にyoutubeを開けなくする
+        let daytimeBlackList = ["youtube.com", "twitter.com"]
+        let currentHour = Calendar.current.component(.hour, from: Date())
+        let isBlackListRequest = daytimeBlackList.contains { request.url?.absoluteString.contains($0) ?? false}
+        if currentHour < 15 && isBlackListRequest {
+            return webView.load(URLRequest(url: URL(string: "https://www.nikkei.com/")!))
+        }
 
       return webView.load(request)
     }
