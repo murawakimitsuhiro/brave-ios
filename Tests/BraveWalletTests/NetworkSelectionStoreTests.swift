@@ -6,7 +6,7 @@
 import XCTest
 import Combine
 import BraveCore
-import BraveShared
+import Preferences
 @testable import BraveWallet
 
 @MainActor class NetworkSelectionStoreTests: XCTestCase {
@@ -40,12 +40,12 @@ import BraveShared
     
     let rpcService = BraveWallet.TestJsonRpcService()
     rpcService._addObserver = { _ in }
-    rpcService._chainId = { $1(currentChainId) }
-    rpcService._network = { $1(currentNetwork) }
+    rpcService._chainIdForOrigin = { $2(currentChainId) }
+    rpcService._network = { $2(currentNetwork) }
     rpcService._allNetworks = { [weak self] coinType, completion in
       completion(self?.allNetworks[coinType, default: []] ?? [])
     }
-    rpcService._setNetwork = { _, _, completion in
+    rpcService._setNetwork = { chainId, coin, origin, completion in
       completion(true)
     }
     rpcService._customNetworks = { $1([]) }
@@ -60,84 +60,6 @@ import BraveShared
     return (keyringService, rpcService, walletService, swapService)
   }
   
-  func testUpdateSelectMode() {
-    Preferences.Wallet.showTestNetworks.value = false
-
-    let (keyringService, rpcService, walletService, swapService) = setupServices()
-    
-    let networkStore = NetworkStore(
-      keyringService: keyringService,
-      rpcService: rpcService,
-      walletService: walletService,
-      swapService: swapService
-    )
-    
-    // wait for all chains to populate in `NetworkStore`
-    let allChainsException = expectation(description: "networkStore-allChains")
-    networkStore.$allChains
-      .dropFirst()
-      .sink { allChains in
-        allChainsException.fulfill()
-      }
-      .store(in: &cancellables)
-    wait(for: [allChainsException], timeout: 1)
-    
-    let store = NetworkSelectionStore(networkStore: networkStore)
-    XCTAssertTrue(store.primaryNetworks.isEmpty, "Test setup failed, expected empty primary networks")
-    XCTAssertTrue(store.secondaryNetworks.isEmpty, "Test setup failed, expected empty secondary networks")
-    
-    store.update()
-    
-    let expectedPrimaryNetworks: [NetworkPresentation] = [
-      .init(network: .network(.mockSolana), subNetworks: [], isPrimaryNetwork: true),
-      .init(network: .network(.mockMainnet), subNetworks: [], isPrimaryNetwork: true)
-    ]
-    let expectedSecondaryNetworks: [NetworkPresentation] = [
-      .init(network: .network(.mockPolygon), subNetworks: [], isPrimaryNetwork: false)
-    ]
-    XCTAssertEqual(store.primaryNetworks, expectedPrimaryNetworks, "Unexpected primary networks set")
-    XCTAssertEqual(store.secondaryNetworks, expectedSecondaryNetworks, "Unexpected secondary networks set")
-  }
-  
-  func testUpdateTestNetworksEnabledSelectMode() {
-    Preferences.Wallet.showTestNetworks.value = true
-    
-    let (keyringService, rpcService, walletService, swapService) = setupServices()
-    
-    let networkStore = NetworkStore(
-      keyringService: keyringService,
-      rpcService: rpcService,
-      walletService: walletService,
-      swapService: swapService
-    )
-    
-    // wait for all chains to populate in `NetworkStore`
-    let allChainsException = expectation(description: "networkStore-allChains")
-    networkStore.$allChains
-      .dropFirst()
-      .sink { allChains in
-        allChainsException.fulfill()
-      }
-      .store(in: &cancellables)
-    wait(for: [allChainsException], timeout: 1)
-    
-    let store = NetworkSelectionStore(networkStore: networkStore)
-    XCTAssertTrue(store.primaryNetworks.isEmpty, "Test setup failed, expected empty primary networks")
-    XCTAssertTrue(store.secondaryNetworks.isEmpty, "Test setup failed, expected empty secondary networks")
-    
-    store.update()
-    
-    let expectedPrimaryNetworks: [NetworkPresentation] = [
-      .init(network: .network(.mockSolana), subNetworks: [.mockSolana, .mockSolanaTestnet], isPrimaryNetwork: true),
-      .init(network: .network(.mockMainnet), subNetworks: [.mockMainnet, .mockGoerli, .mockSepolia], isPrimaryNetwork: true)
-    ]
-    let expectedSecondaryNetworks: [NetworkPresentation] = [
-      .init(network: .network(.mockPolygon), subNetworks: [], isPrimaryNetwork: false)
-    ]
-    XCTAssertEqual(store.primaryNetworks, expectedPrimaryNetworks, "Unexpected primary networks set")
-    XCTAssertEqual(store.secondaryNetworks, expectedSecondaryNetworks, "Unexpected secondary networks set")
-  }
-  
   func testSetSelectedNetwork() async {
     let (keyringService, rpcService, walletService, swapService) = setupServices()
     
@@ -145,11 +67,40 @@ import BraveShared
       keyringService: keyringService,
       rpcService: rpcService,
       walletService: walletService,
-      swapService: swapService
+      swapService: swapService,
+      userAssetManager: TestableWalletUserAssetManager()
     )
+    await networkStore.setup()
     
     let store = NetworkSelectionStore(networkStore: networkStore)
-    let success = await store.selectNetwork(.network(.mockGoerli))
+    let success = await store.selectNetwork(.mockGoerli)
+    XCTAssertTrue(success, "Expected success for selecting Goerli because we have ethereum accounts.")
+  }
+  
+  /// Test `setSelectedChain` will call `setNetwork` with the `Mode.select(isForOrigin: true)`.
+  func testSetSelectedNetworkPanel() async {
+    let origin: URLOrigin = .init(url: URL(string: "https://brave.com")!)
+    let (keyringService, rpcService, walletService, swapService) = setupServices()
+    rpcService._setNetwork = { chainId, coin, origin, completion in
+      XCTAssertEqual(origin, origin)
+      completion(true)
+    }
+    
+    let networkStore = NetworkStore(
+      keyringService: keyringService,
+      rpcService: rpcService,
+      walletService: walletService,
+      swapService: swapService,
+      userAssetManager: TestableWalletUserAssetManager(),
+      origin: origin
+    )
+    await networkStore.setup()
+    
+    let store = NetworkSelectionStore(
+      mode: .select(isForOrigin: true),
+      networkStore: networkStore
+    )
+    let success = await store.selectNetwork(.mockGoerli)
     XCTAssertTrue(success, "Expected success for selecting Goerli because we have ethereum accounts.")
   }
   
@@ -160,11 +111,13 @@ import BraveShared
       keyringService: keyringService,
       rpcService: rpcService,
       walletService: walletService,
-      swapService: swapService
+      swapService: swapService,
+      userAssetManager: TestableWalletUserAssetManager()
     )
+    await networkStore.setup()
     
     let store = NetworkSelectionStore(networkStore: networkStore)
-    let success = await store.selectNetwork(.network(.mockSolana))
+    let success = await store.selectNetwork(.mockSolana)
     XCTAssertFalse(success, "Expected failure for selecting Solana because we have no Solana accounts.")
     XCTAssertTrue(store.isPresentingNextNetworkAlert, "Expected to set isPresentingNextNetworkAlert to true to show alert asking user to create Solana account")
   }
@@ -176,24 +129,28 @@ import BraveShared
       keyringService: keyringService,
       rpcService: rpcService,
       walletService: walletService,
-      swapService: swapService
+      swapService: swapService,
+      userAssetManager: TestableWalletUserAssetManager()
     )
+    await networkStore.setup()
     
     let store = NetworkSelectionStore(mode: .formSelection, networkStore: networkStore)
-    let success = await store.selectNetwork(.network(.mockGoerli))
+    let success = await store.selectNetwork(.mockGoerli)
     XCTAssertTrue(success, "Expected success for selecting Goerli")
     XCTAssertEqual(store.networkSelectionInForm, .mockGoerli)
   }
   
-  func testAlertResponseCreateAccount() {
+  func testAlertResponseCreateAccount() async {
     let (keyringService, rpcService, walletService, swapService) = setupServices()
     
     let networkStore = NetworkStore(
       keyringService: keyringService,
       rpcService: rpcService,
       walletService: walletService,
-      swapService: swapService
+      swapService: swapService,
+      userAssetManager: TestableWalletUserAssetManager()
     )
+    await networkStore.setup()
     
     let store = NetworkSelectionStore(networkStore: networkStore)
     
@@ -203,15 +160,17 @@ import BraveShared
     XCTAssertTrue(store.isPresentingAddAccount, "Expected to set isPresentingAddAccount to true to present add network")
   }
   
-  func testAlertResponseDontCreateAccount() {
+  func testAlertResponseDontCreateAccount() async {
     let (keyringService, rpcService, walletService, swapService) = setupServices()
     
     let networkStore = NetworkStore(
       keyringService: keyringService,
       rpcService: rpcService,
       walletService: walletService,
-      swapService: swapService
+      swapService: swapService,
+      userAssetManager: TestableWalletUserAssetManager()
     )
+    await networkStore.setup()
     
     let store = NetworkSelectionStore(networkStore: networkStore)
     store.isPresentingNextNetworkAlert = true
@@ -229,8 +188,10 @@ import BraveShared
       keyringService: keyringService,
       rpcService: rpcService,
       walletService: walletService,
-      swapService: swapService
+      swapService: swapService,
+      userAssetManager: TestableWalletUserAssetManager()
     )
+    await networkStore.setup()
     
     let store = NetworkSelectionStore(networkStore: networkStore)
     
@@ -274,12 +235,14 @@ import BraveShared
       keyringService: keyringService,
       rpcService: rpcService,
       walletService: walletService,
-      swapService: swapService
+      swapService: swapService,
+      userAssetManager: TestableWalletUserAssetManager()
     )
+    await networkStore.setup()
     
     let store = NetworkSelectionStore(networkStore: networkStore)
     
-    let success = await store.selectNetwork(.network(.mockSolana))
+    let success = await store.selectNetwork(.mockSolana)
     XCTAssertFalse(success, "Expected failure to select network due to no accounts")
     XCTAssertTrue(store.isPresentingNextNetworkAlert, "Expected to present next network alert")
     

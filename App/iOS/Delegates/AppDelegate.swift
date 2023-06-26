@@ -27,6 +27,10 @@ import BraveTalk
 #endif
 import Onboarding
 import os
+import BraveWallet
+import Preferences
+import BraveShields
+import PrivateCDN
 
 extension AppDelegate {
   // A model that is passed used in every scene
@@ -145,9 +149,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     migration = Migration(braveCore: braveCore)
 
-    // Must happen before passcode check, otherwise may unnecessarily reset keychain
-    migration?.moveDatabaseToApplicationDirectory()
-
     // Passcode checking, must happen on immediate launch
     if !DataController.shared.storeExists() {
       // Reset password authentication prior to `WindowProtection`
@@ -165,10 +166,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     // Set the Safari UA for browsing.
     setUserAgent()
+    
     // Moving Brave VPN v1 users to v2 type of credentials.
     // This is a light operation, can be called at every launch without troubles.
     BraveVPN.migrateV1Credentials()
 
+    // Fetching details of GRDRegion for Automatic Region selection
+    BraveVPN.fetchLastUsedRegionDetail()
+    
     // Start the keyboard helper to monitor and cache keyboard state.
     KeyboardHelper.defaultHelper.startObserving()
     DynamicFontHelper.defaultHelper.startObserving()
@@ -338,7 +343,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
       UrpLog.log("Failed to initialize user referral program")
     }
 
-    DebouncingResourceDownloader.shared.startLoading()
 #if canImport(BraveTalk)
     BraveTalkJitsiCoordinator.sendAppLifetimeEvent(
       .didFinishLaunching(options: launchOptions ?? [:])
@@ -356,8 +360,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
     
     Task(priority: .low) {
-      // Attempt to clean up pending file uploads in the background
-      await self.cleanUpWebKitPendingFileUploads()
+      await self.cleanUpLargeTemporaryDirectory()
     }
     
     return shouldPerformAdditionalDelegateHandling
@@ -423,9 +426,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
       (SessionRestoreHandler.path, SessionRestoreHandler()),
       (ErrorPageHandler.path, ErrorPageHandler()),
       (ReaderModeHandler.path, ReaderModeHandler(profile: profile)),
-      (SNSDomainHandler.path, SNSDomainHandler())
+      (IPFSSchemeHandler.path, IPFSSchemeHandler()),
+      (Web3DomainHandler.path, Web3DomainHandler())
     ]
-    
+
     responders.forEach { (path, responder) in
       InternalSchemeHandler.responders[path] = responder
     }
@@ -450,31 +454,32 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     return sceneInfo
   }
   
-  private nonisolated func cleanUpWebKitPendingFileUploads() async {
-    // When a user uploads a file through a web page, WebKit will copy said file to the `/tmp` directory in
-    // the app sandbox. If the user does not close the tab they used to upload (thus destroying the WKWebView)
-    // before the app terminates, then WebKit no longer cleans up the file and it remains on disk until
-    // the OS decides to purge /tmp directories to recover disk space. This function will attempt to remove
-    // known temporary folders that WebKit creates to clean up any files that may be lingering there due to
-    // this WebKit bug.
+  /// Dumps the temporary directory if the total size of the directory exceeds a size threshold (in bytes)
+  private nonisolated func cleanUpLargeTemporaryDirectory(thresholdInBytes: Int = 100_000_000) async {
     let fileManager = FileManager.default
     let tmp = fileManager.temporaryDirectory
-    let knownFolders: Set<String> = ["WKWebFileUpload", "WKFileUploadPanel", "WKVideoUpload"]
     guard let enumerator = fileManager.enumerator(
       at: tmp,
-      includingPropertiesForKeys: [.isDirectoryKey, .nameKey],
-      options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
+      includingPropertiesForKeys: [.isRegularFileKey, .totalFileAllocatedSizeKey, .totalFileSizeKey]
     ) else { return }
+    var totalSize: Int = 0
     while let fileURL = enumerator.nextObject() as? URL {
-      guard
-        let values = try? fileURL.resourceValues(forKeys: [.isDirectoryKey, .nameKey]),
-        let isDirectory = values.isDirectory,
-        let name = values.name,
-        isDirectory,
-        knownFolders.contains(where: name.hasPrefix) else {
+      guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .totalFileAllocatedSizeKey, .totalFileSizeKey]),
+            let isRegularFile = values.isRegularFile,
+            isRegularFile else {
         continue
       }
-      try? fileManager.removeItem(at: fileURL)
+      totalSize += values.totalFileAllocatedSize ?? values.totalFileSize ?? 0
+      if totalSize > thresholdInBytes {
+        // Drop the tmp directory entirely and re-create it after
+        do {
+          try fileManager.removeItem(at: tmp)
+          try fileManager.createDirectory(at: tmp, withIntermediateDirectories: false)
+        } catch {
+          log.warning("Failed to delete & re-create tmp directory which exceeds size limit: \(error.localizedDescription)")
+        }
+        return
+      }
     }
   }
 }

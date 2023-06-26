@@ -4,6 +4,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import BraveShared
+import Preferences
 import BraveCore
 import BraveUI
 import Shared
@@ -16,26 +17,84 @@ import SafariServices
 // MARK: - Callouts
 
 extension BrowserViewController {
-
-  func presentPassCodeMigration() {
-    if KeychainWrapper.sharedAppContainerKeychain.authenticationInfo() != nil {
-      let controller = UIHostingController(rootView: PasscodeMigrationContainerView())
-      controller.rootView.dismiss = { [unowned controller] enableBrowserLock in
-        KeychainWrapper.sharedAppContainerKeychain.setAuthenticationInfo(nil)
-        Preferences.Privacy.lockWithPasscode.value = enableBrowserLock
-        controller.dismiss(animated: true)
-      }
-      controller.modalPresentationStyle = .overFullScreen
-      // No animation to ensure we don't leak the users tabs
-      present(controller, animated: false)
+  
+  // Priority: P3A - Bottom Bar - VPN - Default Browser - Rewards - Cookie Notification - Link Receipt
+  func presentFullScreenCallouts() {
+    for type in FullScreenCalloutType.allCases {
+      presentScreenCallout(for: type)
     }
   }
   
-  func presentBottomBarCallout() {
+  private func presentScreenCallout(for type: FullScreenCalloutType) {
+    switch type {
+    case .p3a:
+      presentP3AScreenCallout()
+    case .bottomBar:
+      presentBottomBarCallout()
+    case .vpn:
+      presentVPNAlertCallout()
+    case .defaultBrowser:
+      presentDefaultBrowserScreenCallout()
+    case .rewards:
+      presentBraveRewardsScreenCallout()
+    case .blockCookieConsentNotices:
+      presentCookieNotificationBlockingCallout()
+    case .linkReceipt:
+      presentLinkReceiptCallout()
+    }
+  }
+  
+  // MARK: Conditional Callout Methods
+  
+  private func presentP3AScreenCallout() {
+    // Check the p3a callout can be shown
+    guard shouldShowCallout(calloutType: .p3a) else {
+      return
+    }
+    
+    let onboardingP3ACalloutController = Welcome3PAViewController().then {
+      $0.isModalInPresentation = true
+      $0.modalPresentationStyle = .overFullScreen
+    }
+
+    let state = WelcomeViewCalloutState.p3a(
+      info: WelcomeViewCalloutState.WelcomeViewDefaultBrowserDetails(
+        title: Strings.Callout.p3aCalloutTitle,
+        toggleTitle: Strings.Callout.p3aCalloutToggleTitle,
+        details: Strings.Callout.p3aCalloutDescription,
+        linkDescription: Strings.Callout.p3aCalloutLinkTitle,
+        primaryButtonTitle: Strings.done,
+        toggleAction: { [weak self] isOn in
+          self?.braveCore.p3aUtils.isP3AEnabled = isOn
+        },
+        linkAction: { url in
+          let p3aLearnMoreController = SFSafariViewController(url: .brave.p3aHelpArticle, configuration: .init())
+          p3aLearnMoreController.modalPresentationStyle = .currentContext
+          
+          onboardingP3ACalloutController.present(p3aLearnMoreController, animated: true)
+        },
+        primaryButtonAction: { [weak self] in
+          Preferences.Onboarding.p3aOnboardingShown.value = true
+
+          self?.isOnboardingOrFullScreenCalloutPresented = true
+          self?.dismiss(animated: false)
+        }
+      )
+    )
+
+    onboardingP3ACalloutController.setLayoutState(state: state)
+    
+    if !isOnboardingOrFullScreenCalloutPresented {
+      braveCore.p3aUtils.isNoticeAcknowledged = true
+      present(onboardingP3ACalloutController, animated: false)
+    }
+  }
+  
+  private func presentBottomBarCallout() {
     guard traitCollection.userInterfaceIdiom == .phone else { return }
     
-    // Check the blockCookieConsentNotices callout can be shown
-    guard shouldShowCallout(calloutType: .blockCookieConsentNotices) else {
+    // Check the bottom bar callout can be shown
+    guard shouldShowCallout(calloutType: .bottomBar) else {
       return
     }
 
@@ -69,52 +128,8 @@ extension BrowserViewController {
     present(popup, animated: false)
   }
   
-  func presentP3AScreenCallout() {
-    // Check the blockCookieConsentNotices callout can be shown
-    guard shouldShowCallout(calloutType: .p3a) else {
-      return
-    }
-    
-    let onboardingP3ACalloutController = Welcome3PAViewController().then {
-      $0.isModalInPresentation = true
-      $0.modalPresentationStyle = .overFullScreen
-    }
-
-    let state = WelcomeViewCalloutState.p3a(
-      info: WelcomeViewCalloutState.WelcomeViewDefaultBrowserDetails(
-        title: Strings.Callout.p3aCalloutTitle,
-        toggleTitle: Strings.Callout.p3aCalloutToggleTitle,
-        details: Strings.Callout.p3aCalloutDescription,
-        linkDescription: Strings.Callout.p3aCalloutLinkTitle,
-        primaryButtonTitle: Strings.done,
-        toggleAction: { [weak self] isOn in
-          self?.braveCore.p3aUtils.isP3AEnabled = isOn
-        },
-        linkAction: { url in
-          let p3aLearnMoreController = SFSafariViewController(url: BraveUX.braveP3ALearnMoreURL, configuration: .init())
-          p3aLearnMoreController.modalPresentationStyle = .currentContext
-          
-          onboardingP3ACalloutController.present(p3aLearnMoreController, animated: true)
-        },
-        primaryButtonAction: { [weak self] in
-          Preferences.Onboarding.p3aOnboardingShown.value = true
-
-          self?.isOnboardingOrFullScreenCalloutPresented = true
-          self?.dismiss(animated: false)
-        }
-      )
-    )
-
-    onboardingP3ACalloutController.setLayoutState(state: state)
-    
-    if !isOnboardingOrFullScreenCalloutPresented {
-      braveCore.p3aUtils.isNoticeAcknowledged = true
-      present(onboardingP3ACalloutController, animated: false)
-    }
-  }
-
-  func presentVPNAlertCallout() {
-    // Check the blockCookieConsentNotices callout can be shown
+  private func presentVPNAlertCallout() {
+    // Check the vpn alert callout can be shown
     guard shouldShowCallout(calloutType: .vpn) else {
       return
     }
@@ -127,7 +142,7 @@ extension BrowserViewController {
     if onboardingNotCompleted
       || showedPopup.value
       || !VPNProductInfo.isComplete {
-      FullScreenCalloutManager.FullScreenCalloutType.vpn.preferenceValue.value = false
+      FullScreenCalloutType.vpn.preferenceValue.value = false
       return
     }
 
@@ -146,9 +161,9 @@ extension BrowserViewController {
     showedPopup.value = true
     present(popup, animated: false)
   }
-
-  func presentDefaultBrowserScreenCallout() {
-    // Check the blockCookieConsentNotices callout can be shown
+  
+  private func presentDefaultBrowserScreenCallout() {
+    // Check the defaultbrowser callout can be shown
     guard shouldShowCallout(calloutType: .defaultBrowser) else {
       return
     }
@@ -184,9 +199,9 @@ extension BrowserViewController {
       present(onboardingController, animated: true)
     }
   }
-
-  func presentBraveRewardsScreenCallout() {
-    // Check the blockCookieConsentNotices callout can be shown
+  
+  private func presentBraveRewardsScreenCallout() {
+    // Check the rewards callout can be shown
     guard shouldShowCallout(calloutType: .rewards) else {
       return
     }
@@ -205,26 +220,54 @@ extension BrowserViewController {
     }
   }
   
-  func presentTabReceivedCallout(url: URL) {
-    // 'Tab Received' indicator will only be shown in normal browsing
-    if !PrivateBrowsingManager.shared.isPrivateBrowsing {
-      let toast = ButtonToast(
-        labelText: Strings.Callout.tabReceivedCalloutTitle,
-        image: UIImage(braveSystemNamed: "brave.tablet.and.phone"),
-        buttonText: Strings.goButtonTittle,
-        completion: { [weak self] buttonPressed in
-          guard let self = self else { return }
-          
-          if buttonPressed {
-            self.tabManager.addTabAndSelect(URLRequest(url: url), isPrivate: false)
-          }
-      })
-      
-      show(toast: toast, duration: ButtonToastUX.toastDismissAfter)
+  private func presentCookieNotificationBlockingCallout() {
+    // Check the blockCookieConsentNotices callout can be shown
+    guard shouldShowCallout(calloutType: .blockCookieConsentNotices) else {
+      return
     }
+    
+    // Don't show this if we already enabled the setting
+    guard !FilterListStorage.shared.isEnabled(for: FilterList.cookieConsentNoticesComponentID) else { return }
+    // Don't show this if we are presenting another popup already
+    guard !isOnboardingOrFullScreenCalloutPresented else { return }
+    // We only show the popup on second launch
+    guard !Preferences.General.isFirstLaunch.value else { return }
+    // Ensure we successfully shown basic onboarding first
+    guard Preferences.FullScreenCallout.omniboxCalloutCompleted.value else { return }
+
+    let popover = PopoverController(
+      contentController: CookieNotificationBlockingConsentViewController(yesCallback: {
+        FilterListStorage.shared.enableFilterList(for: FilterList.cookieConsentNoticesComponentID, isEnabled: true)
+      }),
+      contentSizeBehavior: .preferredContentSize)
+    popover.addsConvenientDismissalMargins = false
+    popover.present(from: topToolbar.locationView.shieldsButton, on: self)
   }
   
-  func shouldShowCallout(calloutType: FullScreenCalloutManager.FullScreenCalloutType) -> Bool {
+  private func presentLinkReceiptCallout(skipSafeGuards: Bool = false) {
+    if !skipSafeGuards {
+      // Show this onboarding only if the VPN has been purchased
+      guard case .purchased = BraveVPN.vpnState else { return }
+      
+      guard shouldShowCallout(calloutType: .linkReceipt) else {
+        return
+      }
+      
+      if Preferences.Onboarding.basicOnboardingCompleted.value != OnboardingState.completed.rawValue {
+        return
+      }
+    }
+    
+    var linkReceiptView = OnboardingLinkReceiptView()
+    linkReceiptView.linkReceiptAction = {
+      self.openURLInNewTab(.brave.braveVPNLinkReceiptProd, isPrivate: PrivateBrowsingManager.shared.isPrivateBrowsing, isPrivileged: false)
+    }
+    let popup = PopupViewController(rootView: linkReceiptView, isDismissable: true)
+    isOnboardingOrFullScreenCalloutPresented = true
+    present(popup, animated: false)
+  }
+  
+  private func shouldShowCallout(calloutType: FullScreenCalloutType) -> Bool {
     if Preferences.DebugFlag.skipNTPCallouts == true || isOnboardingOrFullScreenCalloutPresented || topToolbar.inOverlayMode {
       return false
     }
@@ -234,5 +277,48 @@ extension BrowserViewController {
     }
     
     return true
+  }
+  
+  // MARK: Non-Conditional Callouts Methods
+  
+  func presentPassCodeMigration() {
+    if KeychainWrapper.sharedAppContainerKeychain.authenticationInfo() != nil {
+      let controller = PasscodeMigrationViewController()
+      controller.rootView.dismiss = { [unowned controller] enableBrowserLock in
+        KeychainWrapper.sharedAppContainerKeychain.setAuthenticationInfo(nil)
+        Preferences.Privacy.lockWithPasscode.value = enableBrowserLock
+        controller.dismiss(animated: true)
+      }
+      controller.modalPresentationStyle = .overFullScreen
+      // No animation to ensure we don't leak the users tabs
+      present(controller, animated: false)
+    }
+  }
+  
+  func presentVPNInAppEventCallout() {
+    // If the onboarding has not completed we do not show any promo screens.
+    // This will most likely be the case for users who have not installed the app yet.
+    if Preferences.Onboarding.basicOnboardingCompleted.value != OnboardingState.completed.rawValue {
+      return
+    }
+    
+    switch BraveVPN.vpnState {
+    case .purchased:
+      presentLinkReceiptCallout(skipSafeGuards: true)
+    case .expired, .notPurchased:
+      if VPNProductInfo.isComplete {
+        presentCorrespondingVPNViewController()
+      } else {
+        // This is flaky. We fetch VPN prices from Apple asynchronously and it makes no sense to
+        // show anything if there's no price data. We try to wait one second and see if the price data is there.
+        // If not we do not show anything.
+        // This can happen if the app is not in memory and we have to fresh launch it upon tapping on the in app event.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
+          if VPNProductInfo.isComplete {
+            presentCorrespondingVPNViewController()
+          }
+        }
+      }
+    }
   }
 }

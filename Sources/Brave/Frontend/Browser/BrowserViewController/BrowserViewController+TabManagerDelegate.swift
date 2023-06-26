@@ -99,6 +99,7 @@ extension BrowserViewController: TabManagerDelegate {
     }
 
     updateToolbarUsingTabManager(tabManager)
+    updateStatusBarOverlayColor()
 
     removeAllBars()
     if let bars = selected?.bars {
@@ -107,7 +108,9 @@ extension BrowserViewController: TabManagerDelegate {
       }
     }
 
-    updateFindInPageVisibility(visible: false, tab: previous)
+    if #unavailable(iOS 16.0) {
+      updateFindInPageVisibility(visible: false, tab: previous)
+    }
     displayPageZoom(visible: false)
     updateTabsBarVisibility()
     selected?.updatePullToRefreshVisibility()
@@ -293,7 +296,7 @@ extension BrowserViewController: TabManagerDelegate {
     if !PrivateBrowsingManager.shared.isPrivateBrowsing {
       let recentlyClosedTab = UIAction(
         title: Strings.RecentlyClosed.viewRecentlyClosedTab,
-        image: UIImage(braveSystemNamed: "brave.arrow.counterclockwise.rectangle.portrait"),
+        image: UIImage(braveSystemNamed: "leo.browser.mobile-recent-tabs"),
         handler: UIAction.deferredActionHandler { [weak self] _ in
           guard let self = self else { return }
           

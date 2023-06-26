@@ -5,6 +5,7 @@
 import Foundation
 import Shared
 import BraveShared
+import Preferences
 import Storage
 import Data
 import CoreData
@@ -68,7 +69,7 @@ class HistoryViewController: SiteTableViewController, ToolbarUrlActionsProtocol 
         $0.searchController = searchController
         $0.hidesSearchBarWhenScrolling = false
         $0.rightBarButtonItem =
-          UIBarButtonItem(image: UIImage(braveSystemNamed: "brave.trash")!.template, style: .done, target: self, action: #selector(performDeleteAll))
+          UIBarButtonItem(image: UIImage(braveSystemNamed: "leo.trash")!.template, style: .done, target: self, action: #selector(performDeleteAll))
       }
     }
 
@@ -231,9 +232,8 @@ class HistoryViewController: SiteTableViewController, ToolbarUrlActionsProtocol 
       $0.setLines(historyItem.title, detailText: historyItem.url.absoluteString)
 
       $0.imageView?.contentMode = .scaleAspectFit
-      $0.imageView?.image = Favicon.defaultImage
-      $0.imageView?.layer.borderColor = BraveUX.faviconBorderColor.cgColor
-      $0.imageView?.layer.borderWidth = BraveUX.faviconBorderWidth
+      $0.imageView?.layer.borderColor = FaviconUX.faviconBorderColor.cgColor
+      $0.imageView?.layer.borderWidth = FaviconUX.faviconBorderWidth
       $0.imageView?.layer.cornerRadius = 6
       $0.imageView?.layer.cornerCurve = .continuous
       $0.imageView?.layer.masksToBounds = true
@@ -243,7 +243,7 @@ class HistoryViewController: SiteTableViewController, ToolbarUrlActionsProtocol 
         persistent: !PrivateBrowsingManager.shared.isPrivateBrowsing)
 
       if domain.url?.asURL != nil {
-        cell.imageView?.loadFavicon(for: historyItem.url, monogramFallbackCharacter: historyItem.title?.first)
+        cell.imageView?.loadFavicon(for: historyItem.url)
       } else {
         cell.imageView?.clearMonogramFavicon()
         cell.imageView?.image = Favicon.defaultImage
@@ -259,6 +259,11 @@ class HistoryViewController: SiteTableViewController, ToolbarUrlActionsProtocol 
     }
 
     if let url = URL(string: historyItem.url.absoluteString) {
+      // Donate Custom Intent Open Website
+      if url.isSecureWebPage(), !isPrivateBrowsing {
+        ActivityShortcutManager.shared.donateCustomIntent(for: .openHistory, with: url.absoluteString)
+      }
+      
       dismiss(animated: true) {
         self.toolbarUrlActionsDelegate?.select(url: url, visitType: .typed)
       }

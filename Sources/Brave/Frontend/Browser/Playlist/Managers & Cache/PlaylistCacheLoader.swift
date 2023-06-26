@@ -9,7 +9,8 @@ import WebKit
 import MobileCoreServices
 import Data
 import Shared
-import BraveShared
+import BraveShields
+import Preferences
 import BraveCore
 import Storage
 import os.log
@@ -329,49 +330,50 @@ class PlaylistWebLoader: UIView {
     self.removeFromSuperview()
   }
 
-  func load(url: URL, handler: @escaping (PlaylistInfo?) -> Void) {
-    self.handler = { [weak self] in
-      // Handler cannot be called more than once!
-      self?.handler = nil
-      handler($0)
+  @MainActor
+  func load(url: URL) async -> PlaylistInfo? {
+    return await withCheckedContinuation { continuation in
+      self.handler = { [weak self] in
+        // Handler cannot be called more than once!
+        self?.handler = nil
+        continuation.resume(returning: $0)
+      }
+      
+      guard let webView = tab.webView,
+            let browserViewController = self.currentScene?.browserViewController else {
+        continuation.resume(returning: nil)
+        return
+      }
+      
+      self.certStore = browserViewController.profile.certStore
+      let KVOs: [KVOConstants] = [
+        .estimatedProgress, .loading, .canGoBack,
+        .canGoForward, .URL, .title,
+        .hasOnlySecureContent, .serverTrust,
+      ]
+
+      browserViewController.tab(tab, didCreateWebView: webView)
+      KVOs.forEach { webView.removeObserver(browserViewController, forKeyPath: $0.keyPath) }
+
+      // When creating a tab, TabManager automatically adds a uiDelegate
+      // This webView is invisible and we don't want any UI being handled.
+      webView.uiDelegate = nil
+      webView.navigationDelegate = self
+      
+      tab.replaceContentScript(PlaylistWebLoaderContentHelper(self),
+                               name: PlaylistWebLoaderContentHelper.scriptName,
+                               forTab: tab)
+
+      webView.frame = superview?.bounds ?? self.bounds
+      webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringCacheData, timeoutInterval: 60.0))
     }
-    
-    guard let webView = tab.webView,
-          let browserViewController = self.currentScene?.browserViewController else {
-      self.handler?(nil)
-      return
-    }
-    
-    self.certStore = browserViewController.profile.certStore
-    let KVOs: [KVOConstants] = [
-      .estimatedProgress, .loading, .canGoBack,
-      .canGoForward, .URL, .title,
-      .hasOnlySecureContent, .serverTrust,
-    ]
-
-    browserViewController.tab(tab, didCreateWebView: webView)
-    KVOs.forEach { webView.removeObserver(browserViewController, forKeyPath: $0.rawValue) }
-
-    // When creating a tab, TabManager automatically adds a uiDelegate
-    // This webView is invisible and we don't want any UI being handled.
-    webView.uiDelegate = nil
-    webView.navigationDelegate = self
-    
-    tab.replaceContentScript(PlaylistWebLoaderContentHelper(self),
-                             name: PlaylistWebLoaderContentHelper.scriptName,
-                             forTab: tab)
-
-    webView.frame = superview?.bounds ?? self.bounds
-    webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringCacheData, timeoutInterval: 60.0))
   }
 
   func stop() {
     guard let webView = tab.webView else { return }
     webView.stopLoading()
-    DispatchQueue.main.async {
-      self.handler?(nil)
-      webView.loadHTMLString("<html><body>PlayList</body></html>", baseURL: nil)
-    }
+    self.handler?(nil)
+    webView.loadHTMLString("<html><body>PlayList</body></html>", baseURL: nil)
   }
 
   private class PlaylistWebLoaderContentHelper: TabContentScript {
@@ -400,6 +402,7 @@ class PlaylistWebLoader: UIView {
     static let messageHandlerName = PlaylistScriptHandler.messageHandlerName
     static let scriptSandbox = PlaylistScriptHandler.scriptSandbox
     static let userScript: WKUserScript? = nil
+    static let playlistProcessDocumentLoad = PlaylistScriptHandler.playlistProcessDocumentLoad
 
     func userContentController(_ userContentController: WKUserContentController, didReceiveScriptMessage message: WKScriptMessage, replyHandler: (Any?, String?) -> Void) {
       if !verifyMessage(message: message) {
@@ -505,7 +508,7 @@ extension PlaylistWebLoader: WKNavigationDelegate {
   }
   
   func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-    webView.evaluateSafeJavaScript(functionName: "window.__firefox__.playlistProcessDocumentLoad()",
+    webView.evaluateSafeJavaScript(functionName: "window.__firefox__.\(PlaylistWebLoaderContentHelper.playlistProcessDocumentLoad)()",
                                    args: [],
                                    contentWorld: PlaylistWebLoaderContentHelper.scriptSandbox,
                                    asFunction: false)
@@ -560,8 +563,6 @@ extension PlaylistWebLoader: WKNavigationDelegate {
         let scriptTypes = await tab.currentPageData?.makeUserScriptTypes(domain: domainForMainFrame) ?? []
         tab.setCustomUserScript(scripts: scriptTypes)
       }
-      
-      webView.configuration.preferences.isFraudulentWebsiteWarningEnabled = domainForMainFrame.isShieldExpected(.SafeBrowsing, considerAllShieldsOption: true)
     }
 
     if ["http", "https", "data", "blob", "file"].contains(url.scheme) {
@@ -593,6 +594,7 @@ extension PlaylistWebLoader: WKNavigationDelegate {
 
       // Cookie Blocking code below
       tab.setScript(script: .cookieBlocking, enabled: Preferences.Privacy.blockAllCookies.value)
+
       return (.allow, preferences)
     }
 

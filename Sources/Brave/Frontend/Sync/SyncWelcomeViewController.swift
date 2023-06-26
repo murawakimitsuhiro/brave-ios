@@ -14,6 +14,11 @@ protocol NavigationPrevention {
 }
 
 class SyncWelcomeViewController: SyncViewController {
+  
+  private enum ActionType {
+    case newUser, existingUser, internalSettings
+  }
+  
   private var overlayView: UIView?
 
   private var isLoading: Bool = false {
@@ -134,12 +139,16 @@ class SyncWelcomeViewController: SyncViewController {
   private let syncAPI: BraveSyncAPI
   private let syncProfileServices: BraveSyncProfileServiceIOS
 
-  init(syncAPI: BraveSyncAPI, syncProfileServices: BraveSyncProfileServiceIOS, tabManager: TabManager) {
+  init(syncAPI: BraveSyncAPI,
+       syncProfileServices: BraveSyncProfileServiceIOS,
+       tabManager: TabManager,
+       windowProtection: WindowProtection?,
+       isModallyPresented: Bool = false) {
     self.syncAPI = syncAPI
     self.syncProfileServices = syncProfileServices
     self.tabManager = tabManager
     
-    super.init(nibName: nil, bundle: nil)
+    super.init(windowProtection: windowProtection, isModallyPresented: isModallyPresented)
   }
 
   @available(*, unavailable)
@@ -176,13 +185,115 @@ class SyncWelcomeViewController: SyncViewController {
     textStackView.addArrangedSubview(descriptionStackView)
     mainStackView.addArrangedSubview(textStackView)
 
-    buttonsStackView.addArrangedSubview(newToSyncButton)
     buttonsStackView.addArrangedSubview(existingUserButton)
+    buttonsStackView.addArrangedSubview(newToSyncButton)
     mainStackView.addArrangedSubview(buttonsStackView)
 
-    navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "gearshape"), style: .plain, target: self, action: #selector(onSyncInternalsTapped))
+    navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "gearshape"), style: .plain, target: self, action: #selector(onSyncInternalsAction))
   }
 
+  // MARK: Actions
+
+  @objc
+  private func newToSyncAction() {
+    askForAuthentication() { [weak self] status in
+      guard let self = self, status else { return }
+      
+      let addDevice = SyncSelectDeviceTypeViewController()
+      addDevice.syncInitHandler = { [weak self] (title, type) in
+        guard let self = self else { return }
+        
+        func pushAddDeviceVC() {
+          self.syncServiceObserver = nil
+          guard self.syncAPI.isInSyncGroup else {
+            addDevice.disableNavigationPrevention()
+            let alert = UIAlertController(title: Strings.syncUnsuccessful, message: Strings.syncUnableCreateGroup, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: Strings.OKString, style: .default, handler: nil))
+            addDevice.present(alert, animated: true, completion: nil)
+            return
+          }
+          
+          let view = SyncAddDeviceViewController(title: title, type: type, syncAPI: self.syncAPI)
+          view.addDeviceHandler = self.pushSettings
+          view.navigationItem.hidesBackButton = true
+          self.navigationController?.pushViewController(view, animated: true)
+        }
+        
+        if self.syncAPI.isInSyncGroup {
+          pushAddDeviceVC()
+          return
+        }
+        
+        addDevice.enableNavigationPrevention()
+        
+        // DidJoinSyncChain result should be also checked when creating a new chain
+        self.syncAPI.setDidJoinSyncChain { result in
+          if result {
+            self.syncDeviceInfoObserver = self.syncAPI.addDeviceStateObserver { [weak self] in
+              guard let self else { return }
+              self.syncServiceObserver = nil
+              self.syncDeviceInfoObserver = nil
+              
+              pushAddDeviceVC()
+            }
+          } else {
+            self.syncAPI.leaveSyncGroup()
+            addDevice.disableNavigationPrevention()
+            self.navigationController?.popViewController(animated: true)
+          }
+        }
+        
+        self.syncAPI.joinSyncGroup(codeWords: self.syncAPI.getSyncCode(), syncProfileService: self.syncProfileServices)
+        self.handleSyncSetupFailure()
+      }
+      
+      self.navigationController?.pushViewController(addDevice, animated: true)
+    }
+  }
+
+  @objc
+  private func existingUserAction() {
+    askForAuthentication() { [weak self] status in
+      guard let self = self, status else { return }
+      
+      let pairCamera = SyncPairCameraViewController(syncAPI: syncAPI)
+      pairCamera.delegate = self
+      self.navigationController?.pushViewController(pairCamera, animated: true)
+    }
+  }
+  
+  @objc
+  private func onSyncInternalsAction() {
+    askForAuthentication() { [weak self] status in
+      guard let self = self, status else { return }
+      
+      let syncInternalsController = syncAPI.createSyncInternalsController().then {
+        $0.title = Strings.braveSyncInternalsTitle
+      }
+      
+      navigationController?.pushViewController(syncInternalsController, animated: true)
+    }
+  }
+
+  // MARK: Internal
+  
+  private func pushSettings() {
+    if !DeviceInfo.hasConnectivity() {
+      present(SyncAlerts.noConnection, animated: true)
+      return
+    }
+
+    let syncSettingsVC = SyncSettingsTableViewController(
+      isModallyPresented: true,
+      syncAPI: syncAPI,
+      syncProfileService: syncProfileServices,
+      tabManager: tabManager,
+      windowProtection: windowProtection,
+      requiresAuthentication: false)
+    
+    navigationController?.pushViewController(syncSettingsVC, animated: true)
+  }
+  
   /// Sync setup failure is handled here because it can happen from few places in children VCs(new chain, qr code, codewords)
   /// This makes all presented Sync View Controllers to dismiss, cleans up any sync setup and shows user a friendly message.
   private func handleSyncSetupFailure() {
@@ -196,74 +307,6 @@ class SyncWelcomeViewController: SyncViewController {
         }
       }
     }
-  }
-
-  @objc
-  private func onSyncInternalsTapped() {
-    let syncInternalsController = syncAPI.createSyncInternalsController().then {
-      $0.title = Strings.braveSyncInternalsTitle
-    }
-
-    navigationController?.pushViewController(syncInternalsController, animated: true)
-  }
-
-  @objc func newToSyncAction() {
-    let addDevice = SyncSelectDeviceTypeViewController()
-    addDevice.syncInitHandler = { [weak self] (title, type) in
-      guard let self = self else { return }
-
-      func pushAddDeviceVC() {
-        self.syncServiceObserver = nil
-        guard self.syncAPI.isInSyncGroup else {
-          addDevice.disableNavigationPrevention()
-          let alert = UIAlertController(title: Strings.syncUnsuccessful, message: Strings.syncUnableCreateGroup, preferredStyle: .alert)
-          alert.addAction(UIAlertAction(title: Strings.OKString, style: .default, handler: nil))
-          addDevice.present(alert, animated: true, completion: nil)
-          return
-        }
-
-        let view = SyncAddDeviceViewController(title: title, type: type, syncAPI: self.syncAPI)
-        view.addDeviceHandler = self.pushSettings
-        view.navigationItem.hidesBackButton = true
-        self.navigationController?.pushViewController(view, animated: true)
-      }
-
-      if self.syncAPI.isInSyncGroup {
-        pushAddDeviceVC()
-        return
-      }
-
-      addDevice.enableNavigationPrevention()
-      self.syncDeviceInfoObserver = self.syncAPI.addDeviceStateObserver {
-        self.syncDeviceInfoObserver = nil
-        pushAddDeviceVC()
-      }
-
-      self.syncAPI.joinSyncGroup(codeWords: self.syncAPI.getSyncCode(), syncProfileService: self.syncProfileServices)
-      self.handleSyncSetupFailure()
-    }
-
-    self.navigationController?.pushViewController(addDevice, animated: true)
-  }
-
-  @objc func existingUserAction() {
-    let pairCamera = SyncPairCameraViewController(syncAPI: syncAPI)
-    pairCamera.delegate = self
-    self.navigationController?.pushViewController(pairCamera, animated: true)
-  }
-
-  private func pushSettings() {
-    if !DeviceInfo.hasConnectivity() {
-      present(SyncAlerts.noConnection, animated: true)
-      return
-    }
-
-    let syncSettingsVC = SyncSettingsTableViewController(
-      showDoneButton: true,
-      syncAPI: syncAPI,
-      syncProfileService: syncProfileServices,
-      tabManager: tabManager)
-    navigationController?.pushViewController(syncSettingsVC, animated: true)
   }
 }
 

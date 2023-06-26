@@ -6,7 +6,7 @@ import WebKit
 import Shared
 import Data
 import BraveCore
-import BraveShared
+import Preferences
 import BraveWallet
 import os.log
 
@@ -24,7 +24,8 @@ class UserScriptManager {
     .playlist,
     .resourceDownloader,
     .windowRenderHelper,
-    .readyStateHelper
+    .readyStateHelper,
+    .youtubeQuality
   ]
   
   /// Scripts that are loaded after `staticScripts`
@@ -82,6 +83,11 @@ class UserScriptManager {
     }
   }()
   
+  private var walletEthProviderScript: WKUserScript?
+  private var walletSolProviderScript: WKUserScript?
+  private var walletSolanaWeb3Script: WKUserScript?
+  private var walletSolanaWalletStandardScript: WKUserScript?
+  
   enum ScriptType: String, CaseIterable {
     case faviconFetcher
     case cookieBlocking
@@ -98,6 +104,7 @@ class UserScriptManager {
     case readyStateHelper
     case ethereumProvider
     case solanaProvider
+    case youtubeQuality
     
     fileprivate var script: WKUserScript? {
       switch self {
@@ -119,6 +126,7 @@ class UserScriptManager {
       case .resourceDownloader: return ResourceDownloadScriptHandler.userScript
       case .windowRenderHelper: return WindowRenderScriptHandler.userScript
       case .readyStateHelper: return ReadyStateScriptHandler.userScript
+      case .youtubeQuality: return YoutubeQualityScriptHandler.userScript
       }
     }
     
@@ -132,12 +140,94 @@ class UserScriptManager {
     }
   }
   
-  private func loadScripts(into tab: Tab, scripts: Set<ScriptType>) {
-    guard let webView = tab.webView else {
-      assertionFailure("Injecting Scripts into a Tab that has no WebView")
-      return
+  func fetchWalletScripts(from braveWalletAPI: BraveWalletAPI) {
+    if let ethJS = braveWalletAPI.providerScripts(for: .eth)[.ethereum] {
+      let providerJS = """
+      window.__firefox__.execute(function($, $Object) {
+        if (window.isSecureContext) {
+          \(ethJS)
+        }
+      });
+      """
+      walletEthProviderScript = WKUserScript(
+        source: providerJS,
+        injectionTime: .atDocumentStart,
+        forMainFrameOnly: true,
+        in: EthereumProviderScriptHandler.scriptSandbox
+      )
     }
-    
+    if let solanaWeb3Script = braveWalletAPI.providerScripts(for: .sol)[.solanaWeb3] {
+      let script = """
+        // Define a global variable with a random name
+        // Local variables are NOT enumerable!
+        let \(UserScriptManager.walletSolanaNameSpace);
+        
+        window.__firefox__.execute(function($, $Object, $Function, $Array) {
+          // Inject Solana as a Local Variable.
+          \(solanaWeb3Script)
+        
+          \(UserScriptManager.walletSolanaNameSpace) = $({
+            solanaWeb3: $(solanaWeb3)
+          });
+        
+          // Failed to load SolanaWeb3
+          if (typeof \(UserScriptManager.walletSolanaNameSpace) === 'undefined') {
+            return;
+          }
+        
+          const freezeExceptions = $Array.of("BN");
+        
+          for (const value of $Object.values(\(UserScriptManager.walletSolanaNameSpace).solanaWeb3)) {
+            if (!value) {
+              continue;
+            }
+        
+            $.extensiveFreeze(value, freezeExceptions);
+          }
+        
+          $.deepFreeze(\(UserScriptManager.walletSolanaNameSpace).solanaWeb3);
+          $.deepFreeze(\(UserScriptManager.walletSolanaNameSpace));
+        });
+        """
+      self.walletSolanaWeb3Script = WKUserScript(
+        source: script,
+        injectionTime: .atDocumentStart,
+        forMainFrameOnly: true,
+        in: SolanaProviderScriptHandler.scriptSandbox
+      )
+    }
+    if let walletSolProviderScript = braveWalletAPI.providerScripts(for: .sol)[.solana] {
+      let script = """
+      window.__firefox__.execute(function($, $Object) {
+        \(walletSolProviderScript)
+      });
+      """
+      self.walletSolProviderScript = WKUserScript(
+        source: script,
+        injectionTime: .atDocumentStart,
+        forMainFrameOnly: true,
+        in: SolanaProviderScriptHandler.scriptSandbox
+      )
+    }
+    if let walletStandardScript = braveWalletAPI.providerScripts(for: .sol)[.walletStandard] {
+      let script = """
+      window.__firefox__.execute(function($, $Object) {
+         \(walletStandardScript)
+         window.addEventListener('wallet-standard:app-ready', (e) => {
+            walletStandardBrave.initialize(window.braveSolana);
+        })
+      });
+      """
+      self.walletSolanaWalletStandardScript = WKUserScript(
+        source: script,
+        injectionTime: .atDocumentStart,
+        forMainFrameOnly: true,
+        in: SolanaProviderScriptHandler.scriptSandbox
+      )
+    }
+  }
+  
+  public func loadScripts(into webView: WKWebView, scripts: Set<ScriptType>) {
     var scripts = scripts
     
     webView.configuration.userContentController.do { scriptController in
@@ -183,22 +273,30 @@ class UserScriptManager {
   func loadCustomScripts(
     into tab: Tab,
     userScripts: Set<ScriptType>,
-    customScripts: Set<UserScriptType>,
-    walletEthProviderScript: WKUserScript?,
-    walletSolProviderScripts: [BraveWalletProviderScriptKey: String]
+    customScripts: Set<UserScriptType>
   ) {
     guard let webView = tab.webView else {
       assertionFailure("Injecting Scripts into a Tab that has no WebView")
       return
     }
     
-    loadScripts(into: tab, scripts: userScripts)
+    #if DEBUG
+    ContentBlockerManager.log.debug("Loaded \(userScripts.count + customScripts.count) scripts:")
+    userScripts.sorted(by: { $0.rawValue < $1.rawValue}).forEach { scriptType in
+      ContentBlockerManager.log.debug(" \(scriptType.debugDescription)")
+    }
+    customScripts.sorted(by: { $0.order < $1.order}).forEach { scriptType in
+      ContentBlockerManager.log.debug(" #\(scriptType.order) \(scriptType.debugDescription)")
+    }
+    #endif
+    
+    loadScripts(into: webView, scripts: userScripts)
     
     webView.configuration.userContentController.do { scriptController in
       // TODO: Somehow refactor wallet and get rid of this
       // Inject WALLET specific scripts
       
-      if tab.isPrivate == false,
+      if !tab.isPrivate,
          Preferences.Wallet.WalletType(rawValue: Preferences.Wallet.defaultEthWallet.value) == .brave,
          let script = self.dynamicScripts[.ethereumProvider] {
         
@@ -211,85 +309,27 @@ class UserScriptManager {
       }
       
       // Inject SolanaWeb3Script.js
-      if tab.isPrivate == false,
+      if !tab.isPrivate,
          Preferences.Wallet.WalletType(rawValue: Preferences.Wallet.defaultSolWallet.value) == .brave,
-         let solanaWeb3Script = tab.walletSolProviderScripts[.solanaWeb3] {
-        
-        let script = """
-          // Define a global variable with a random name
-          // Local variables are NOT enumerable!
-          let \(UserScriptManager.walletSolanaNameSpace);
-          
-          window.__firefox__.execute(function($, $Object, $Function, $Array) {
-            // Inject Solana as a Local Variable.
-            \(solanaWeb3Script)
-          
-            \(UserScriptManager.walletSolanaNameSpace) = $({
-              solanaWeb3: $(solanaWeb3)
-            });
-          
-            // Failed to load SolanaWeb3
-            if (typeof \(UserScriptManager.walletSolanaNameSpace) === 'undefined') {
-              return;
-            }
-          
-            const freezeExceptions = $Array.of("BN");
-          
-            for (const value of $Object.values(\(UserScriptManager.walletSolanaNameSpace).solanaWeb3)) {
-              if (!value) {
-                continue;
-              }
-          
-              $.extensiveFreeze(value, freezeExceptions);
-            }
-          
-            $.deepFreeze(\(UserScriptManager.walletSolanaNameSpace).solanaWeb3);
-            $.deepFreeze(\(UserScriptManager.walletSolanaNameSpace));
-          });
-          """
-        
-        let wkScript = WKUserScript(
-          source: script,
-          injectionTime: .atDocumentStart,
-          forMainFrameOnly: true,
-          in: SolanaProviderScriptHandler.scriptSandbox)
-        scriptController.addUserScript(wkScript)
+         let solanaWeb3Script = self.walletSolanaWeb3Script {
+        scriptController.addUserScript(solanaWeb3Script)
       }
       
-      if tab.isPrivate == false,
+      if !tab.isPrivate,
          Preferences.Wallet.WalletType(rawValue: Preferences.Wallet.defaultSolWallet.value) == .brave,
          let script = self.dynamicScripts[.solanaProvider] {
 
         // Inject solana provider
         scriptController.addUserScript(script)
 
-        if let walletSolProviderScript = walletSolProviderScripts[.solana] {
-          let script = """
-          window.__firefox__.execute(function($, $Object) {
-            \(walletSolProviderScript)
-          });
-          """
-          let wkScript = WKUserScript(
-            source: script,
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: true,
-            in: SolanaProviderScriptHandler.scriptSandbox)
-          scriptController.addUserScript(wkScript)
+        if let walletSolProviderScript = walletSolProviderScript {
+          scriptController.addUserScript(walletSolProviderScript)
         }
       }
       
-      if let solanaProvider = tab.walletSolProvider {
-        solanaProvider.isSolanaKeyringCreated { isSolanaKeyringCreated in
-          guard isSolanaKeyringCreated, // don't inject if Solana keyring is not created.
-                let walletStandardScript = tab.walletSolProviderScripts[.walletStandard]
-          else { return }
-          let wkScript = WKUserScript(
-            source: walletStandardScript,
-            injectionTime: .atDocumentEnd,
-            forMainFrameOnly: true,
-            in: SolanaProviderScriptHandler.scriptSandbox)
-          scriptController.addUserScript(wkScript)
-        }
+      if !tab.isPrivate,
+         let walletStandardScript = self.walletSolanaWalletStandardScript {
+        scriptController.addUserScript(walletStandardScript)
       }
       
       // TODO: Refactor this and get rid of the `UserScriptType`
@@ -306,3 +346,30 @@ class UserScriptManager {
     }
   }
 }
+
+#if DEBUG
+extension UserScriptType: CustomDebugStringConvertible {
+  var debugDescription: String {
+    switch self {
+    case .domainUserScript(let domainUserScript):
+      return "domainUserScript(\(domainUserScript.associatedDomains.joined(separator: ", ")))"
+    case .engineScript(let configuration):
+      return "engineScript(\(configuration.frameURL))"
+    case .farblingProtection(let etld):
+      return "farblingProtection(\(etld))"
+    case .nacl:
+      return "nacl"
+    case .siteStateListener:
+      return "siteStateListener"
+    case .selectorsPoller:
+      return "selectorsPoller"
+    }
+  }
+}
+
+extension UserScriptManager.ScriptType: CustomDebugStringConvertible {
+  var debugDescription: String {
+    return rawValue
+  }
+}
+#endif

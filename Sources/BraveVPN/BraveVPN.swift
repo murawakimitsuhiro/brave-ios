@@ -5,7 +5,7 @@
 
 import UIKit
 import Shared
-import BraveShared
+import Preferences
 import NetworkExtension
 import Data
 import GuardianConnect
@@ -16,12 +16,17 @@ public class BraveVPN {
   private static let housekeepingApi = GRDHousekeepingAPI()
   private static let helper = GRDVPNHelper.sharedInstance()
   private static let serverManager = GRDServerManager()
+  private static let tunnelManager = GRDTunnelManager()
   
   public static let iapObserver = IAPObserver()
 
   /// List of regions the VPN can connect to.
   /// This list is not static and should be refetched every now and then.
   static var regions: [GRDRegion] = []
+  
+  /// Record last used region
+  /// It is used to hold details of the region when automatic selection is used
+  static var lastKnownRegion: GRDRegion?
   
   // Non translatable
   private static let connectionName = "Brave Firewall + VPN"
@@ -65,6 +70,9 @@ public class BraveVPN {
 
     helper.dummyDataForDebugging = !AppConstants.buildChannel.isPublic
     helper.tunnelLocalizedDescription = connectionName
+    helper.grdTunnelProviderManagerLocalizedDescription = connectionName
+    helper.tunnelProviderBundleIdentifier = AppInfo.baseBundleIdentifier + ".BraveWireGuard"
+    helper.appGroupIdentifier = AppInfo.sharedContainerIdentifier
 
     if case .notPurchased = vpnState {
       // Unlikely if user has never bought the vpn, we clear vpn config here for safety.
@@ -272,17 +280,38 @@ public class BraveVPN {
         }
         
         reconnectPending = false
-        completion?(status == .success)
+        
+        // Re-connected user should update last used region - detail is pulled
+        fetchLastUsedRegionDetail() { _, _ in
+          DispatchQueue.main.async {
+            completion?(status == .success)
+          }
+        }
       }
     } else {
+      // Setting User preferred Transport Protocol to WireGuard
+      // In order to easily fetch and change in settings later
+      GRDTransportProtocol.setUserPreferred(.wireGuard)
+      
       // New user or no credentials and have to remake them.
-      helper.configureFirstTimeUserPostCredential(nil) { success, error in
+      helper.configureFirstTimeUser(
+        for: GRDTransportProtocol.getUserPreferredTransportProtocol(),
+        postCredential: nil) { success, error in
         if let error = error {
           logAndStoreError("configureFirstTimeUserPostCredential \(error)")
+        } else {
+          helper.ikev2VPNManager.removeFromPreferences()
         }
-        
+         
         reconnectPending = false
-        completion?(success)
+          
+        // First time user will connect automatic region - detail is pulled
+        fetchLastUsedRegionDetail() { _, _ in
+          DispatchQueue.main.async {  
+            completion?(success)
+          }
+        }
+      
       }
     }
   }
@@ -298,6 +327,36 @@ public class BraveVPN {
 
     connectToVPN() { status in
       completion?(status)
+    }
+  }
+  
+  public static func changePreferredTransportProtocol(with transportProtocol: TransportProtocol, completion: ((Bool) -> Void)? = nil) {
+    helper.forceDisconnectVPNIfNecessary()
+    GRDVPNHelper.clearVpnConfiguration()
+    
+    GRDTransportProtocol.setUserPreferred(transportProtocol)
+
+    // New user or no credentials and have to remake them.
+    helper.configureFirstTimeUser(for: transportProtocol, postCredential: nil) { success, error in
+      if let error = error {
+        logAndStoreError("Change Preferred transport FirstTimeUserPostCredential \(error)")
+      } else {
+        removeConfigurationFromPreferences(for: transportProtocol)
+      }
+      
+      reconnectPending = false
+      completion?(success)
+    }
+    
+    func removeConfigurationFromPreferences(for transportProtocol: TransportProtocol) {
+      switch transportProtocol {
+      case .wireGuard:
+        helper.ikev2VPNManager.removeFromPreferences()
+      case .ikEv2:
+        tunnelManager.removeTunnel()
+      default:
+        return
+      }
     }
   }
 
@@ -324,6 +383,12 @@ public class BraveVPN {
     helper.selectedRegion
   }
   
+  /// Return the region last activated with the details
+  /// It will give region details for automatic
+  public static var activatedRegion: GRDRegion? {
+    helper.selectedRegion ?? lastKnownRegion
+  }
+  
   /// Switched to use an automatic region, region closest to user location.
   public static func useAutomaticRegion() {
     helper.select(nil)
@@ -335,21 +400,33 @@ public class BraveVPN {
   }
   
   public static func changeVPNRegion(to region: GRDRegion?, completion: @escaping ((Bool) -> Void)) {
+    if isConnected {
+      helper.disconnectVPN()
+    }
+    
     helper.select(region)
-    helper.configureFirstTimeUser(with: region) { success, error in
+    
+    // The preferred tunnel has to be used for configuration
+    // Otherwise faulty configuration will be added while connecting
+    let activeTunnelProtocol = GRDTransportProtocol.getUserPreferredTransportProtocol()
+    
+    helper.configureFirstTimeUser(for: activeTunnelProtocol, with: region) { success, error in
+      let subcredentials = "Credentials \(GRDKeychain.getPasswordString(forAccount: kKeychainStr_SubscriberCredential) ?? "Empty")"
+      
       if success {
         Logger.module.debug("Changed VPN region to \(region?.regionName ?? "default selection")")
         completion(true)
       } else {
-        Logger.module.debug("connection failed: \(error ?? "nil")")
+        Logger.module.debug("Connection failed: \(error ?? "nil")")
+        Logger.module.debug("Region change connection failed for subcredentials \(subcredentials)")
         completion(false)
       }
     }
   }
   
   public static func populateRegionDataIfNecessary () {
-    serverManager.getRegionsWithCompletion { regions in
-      self.regions = regions
+    serverManager.regions { regions, _ in
+      self.regions = regions ?? []
     }
   }
   
@@ -441,6 +518,32 @@ public class BraveVPN {
             Preferences.VPN.vpnWorksInBackgroundNotificationShowed.value = true
           }
         }
+      }
+    }
+  }
+  
+  /// The function that fetched the last used region details from timezones
+  /// It used to get details of Region when Automatic Region is used
+  /// Otherwise the region detail items will be empty
+  /// - Parameter completion: completion block that returns region with details or error
+  public static func fetchLastUsedRegionDetail(_ completion: ((GRDRegion?, Bool) -> Void)? = nil) {
+    switch vpnState {
+    case .expired, .notPurchased:
+      break
+    case .purchased(_):
+      housekeepingApi.requestTimeZonesForRegions { timeZones, success, responseStatusCode in
+        guard success, let timeZones = timeZones else {
+          logAndStoreError(
+            "Failed to get timezones while fetching region: \(responseStatusCode)",
+            printToConsole: true)
+          completion?(nil, false)
+          
+          return
+        }
+        
+        let region = GRDServerManager.localRegion(fromTimezones: timeZones)
+        completion?(region, true)
+        lastKnownRegion = region
       }
     }
   }

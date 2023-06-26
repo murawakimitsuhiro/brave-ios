@@ -57,7 +57,7 @@ private struct PlaylistFolderView: View {
   var body: some View {
     HStack {
       HStack(spacing: 10.0) {
-        Image(braveSystemName: "brave.folder")
+        Image(braveSystemName: "leo.folder")
           .foregroundColor(isSourceFolder ? Color(.braveDisabled.resolvedColor(with: .init(userInterfaceStyle: .light))) : Color(.braveBlurpleTint))
           .frame(width: imageSize)
 
@@ -111,13 +111,10 @@ struct PlaylistMoveFolderView: View {
 
   private var itemDescription: String {
     if selectedItems.count == 1 {
-      return selectedItems[0].name ?? Strings.PlaylistFolders.playlistFolderMoveItemWithMultipleNoNameTitle
+      return selectedItems[0].name
     }
 
-    guard let title = selectedItems[0].name else {
-      return Strings.PlaylistFolders.playlistFolderMoveItemWithMultipleNoNameTitle
-    }
-
+    let title = selectedItems[0].name
     if selectedItems.count == 2 {
       return String.localizedStringWithFormat(Strings.PlaylistFolders.playlistFolderMoveItemDescription, title)
     }

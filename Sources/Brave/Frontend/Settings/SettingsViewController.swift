@@ -5,6 +5,7 @@
 import UIKit
 import Shared
 import BraveShared
+import Preferences
 import Static
 import SwiftKeychainWrapper
 import LocalAuthentication
@@ -29,6 +30,17 @@ extension TabBarVisibility: RepresentableOptionType {
   }
 }
 
+extension Preferences.AutoCloseTabsOption: RepresentableOptionType {
+  public var displayString: String {
+    switch self {
+    case .manually: return Strings.Settings.autocloseTabsManualOption
+    case .oneDay: return Strings.Settings.autocloseTabsOneDayOption
+    case .oneWeek: return Strings.Settings.autocloseTabsOneWeekOption
+    case .oneMonth: return Strings.Settings.autocloseTabsOneMonthOption
+    }
+  }
+}
+
 protocol SettingsDelegate: AnyObject {
   func settingsOpenURLInNewTab(_ url: URL)
   func settingsOpenURLs(_ urls: [URL])
@@ -40,7 +52,6 @@ class SettingsViewController: TableViewController {
   private let profile: Profile
   private let tabManager: TabManager
   private let rewards: BraveRewards?
-  private let legacyWallet: BraveLedger?
   private let feedDataSource: FeedDataSource
   private let historyAPI: BraveHistoryAPI
   private let passwordAPI: BravePasswordAPI
@@ -60,7 +71,6 @@ class SettingsViewController: TableViewController {
     tabManager: TabManager,
     feedDataSource: FeedDataSource,
     rewards: BraveRewards? = nil,
-    legacyWallet: BraveLedger? = nil,
     windowProtection: WindowProtection?,
     braveCore: BraveCoreMain,
     keyringStore: KeyringStore? = nil,
@@ -70,7 +80,6 @@ class SettingsViewController: TableViewController {
     self.tabManager = tabManager
     self.feedDataSource = feedDataSource
     self.rewards = rewards
-    self.legacyWallet = legacyWallet
     self.windowProtection = windowProtection
     self.historyAPI = braveCore.historyAPI
     self.passwordAPI = braveCore.passwordAPI
@@ -105,7 +114,7 @@ class SettingsViewController: TableViewController {
 
   private func displayRewardsDebugMenu() {
     guard let rewards = rewards else { return }
-    let settings = RewardsDebugSettingsViewController(rewards: rewards, legacyWallet: legacyWallet)
+    let settings = RewardsDebugSettingsViewController(rewards: rewards)
     navigationController?.pushViewController(settings, animated: true)
   }
 
@@ -122,10 +131,10 @@ class SettingsViewController: TableViewController {
   }
 
   // Do not use `sections` directly to access sections/rows. Use DataSource.sections instead.
-  private var sections: [Static.Section] {
+  private func makeSections() -> [Static.Section] {
     var list = [
       defaultBrowserSection,
-      featuresSection,
+      makeFeaturesSection(),
       generalSection,
       displaySection,
       tabsSection,
@@ -198,22 +207,48 @@ class SettingsViewController: TableViewController {
     return section
   }()
 
-  private lazy var featuresSection: Static.Section = {
+  private func makeFeaturesSection() -> Static.Section {
+    weak var spinner: SpinnerView?
+    
     var section = Static.Section(
       header: .title(Strings.features),
       rows: [
         Row(
           text: Strings.braveShieldsAndPrivacy,
           selection: { [unowned self] in
-            let controller = BraveShieldsAndPrivacySettingsController(
+            let controller = UIHostingController(rootView: AdvancedShieldsSettingsView(
               profile: self.profile,
               tabManager: self.tabManager,
               feedDataSource: self.feedDataSource,
               historyAPI: self.historyAPI,
-              p3aUtilities: self.p3aUtilities
-            )
+              p3aUtilities: self.p3aUtilities,
+              clearDataCallback: { [weak self] isLoading in
+                guard let view = self?.navigationController?.view, view.window != nil else {
+                  assertionFailure()
+                  return
+                }
+                
+                if isLoading, spinner == nil {
+                  let newSpinner = SpinnerView()
+                  newSpinner.present(on: view)
+                  spinner = newSpinner
+                } else {
+                  spinner?.dismiss()
+                  spinner = nil
+                }
+              }
+            ))
+            
+            controller.rootView.openURLAction = { [unowned self] url in
+              self.settingsDelegate?.settingsOpenURLInNewTab(url)
+              self.dismiss(animated: true)
+            }
+            
             self.navigationController?.pushViewController(controller, animated: true)
-          }, image: UIImage(named: "settings-shields", in: .module, compatibleWith: nil)!, accessory: .disclosureIndicator)
+          },
+          image: UIImage(braveSystemNamed: "leo.shield.done"),
+          accessory: .disclosureIndicator
+        )
       ],
       uuid: featureSectionUUID.uuidString
     )
@@ -223,17 +258,17 @@ class SettingsViewController: TableViewController {
         Row(
           text: Strings.braveRewardsTitle,
           selection: { [unowned self] in
-            let rewardsVC = BraveRewardsSettingsViewController(rewards, legacyWallet: self.legacyWallet)
+            let rewardsVC = BraveRewardsSettingsViewController(rewards)
             rewardsVC.walletTransferLearnMoreTapped = { [weak self] in
               guard let self = self else { return }
               self.dismiss(animated: true) {
                 self.presentingViewController?.dismiss(animated: true) {
-                  self.settingsDelegate?.settingsOpenURLInNewTab(BraveUX.braveRewardsLearnMoreURL)
+                  self.settingsDelegate?.settingsOpenURLInNewTab(.brave.rewardsOniOS)
                 }
               }
             }
             self.navigationController?.pushViewController(rewardsVC, animated: true)
-          }, image: UIImage(named: "settings-brave-rewards", in: .module, compatibleWith: nil)!, accessory: .disclosureIndicator)
+          }, image: UIImage(braveSystemNamed: "leo.product.bat-outline"), accessory: .disclosureIndicator)
       ]
     }
 
@@ -248,12 +283,12 @@ class SettingsViewController: TableViewController {
           })
           controller.viewDidDisappear = {
             if Preferences.Review.braveNewsCriteriaPassed.value {
-              AppReviewManager.shared.isReviewRequired = true
+              AppReviewManager.shared.isRevisedReviewRequired = true
               Preferences.Review.braveNewsCriteriaPassed.value = false
             }
           }
           self.navigationController?.pushViewController(controller, animated: true)
-        }, image: UIImage(named: "settings-brave-today", in: .module, compatibleWith: nil)!.template, accessory: .disclosureIndicator)
+        }, image: UIImage(braveSystemNamed: "leo.product.brave-news"), accessory: .disclosureIndicator)
     )
 
     vpnRow = vpnSettingsRow()
@@ -267,11 +302,11 @@ class SettingsViewController: TableViewController {
         selection: { [unowned self] in
           let playlistSettings = PlaylistSettingsViewController()
           self.navigationController?.pushViewController(playlistSettings, animated: true)
-        }, image: UIImage(named: "settings-playlist", in: .module, compatibleWith: nil)!.template, accessory: .disclosureIndicator)
+        }, image: UIImage(braveSystemNamed: "leo.product.playlist"), accessory: .disclosureIndicator)
     )
 
     return section
-  }()
+  }
 
   private lazy var generalSection: Static.Section = {
     var general = Static.Section(
@@ -282,7 +317,7 @@ class SettingsViewController: TableViewController {
           selection: { [unowned self] in
             let viewController = SearchSettingsTableViewController(profile: self.profile)
             self.navigationController?.pushViewController(viewController, animated: true)
-          }, image: UIImage(named: "settings-search", in: .module, compatibleWith: nil)!.template, accessory: .disclosureIndicator, cellClass: MultilineValue1Cell.self),
+          }, image: UIImage(braveSystemNamed: "leo.search"), accessory: .disclosureIndicator, cellClass: MultilineValue1Cell.self),
         Row(
           text: Strings.sync,
           selection: { [unowned self] in
@@ -291,20 +326,34 @@ class SettingsViewController: TableViewController {
                 self.present(SyncAlerts.noConnection, animated: true)
                 return
               }
+              
+              let syncSettingsViewController = SyncSettingsTableViewController(
+                syncAPI: syncAPI,
+                syncProfileService:
+                  syncProfileServices,
+                tabManager: tabManager,
+                windowProtection: windowProtection,
+                requiresAuthentication: true)
 
               self.navigationController?
-                .pushViewController(SyncSettingsTableViewController(syncAPI: syncAPI, syncProfileService: syncProfileServices, tabManager: tabManager), animated: true)
+                .pushViewController(syncSettingsViewController, animated: true)
             } else {
-              self.navigationController?.pushViewController(SyncWelcomeViewController(syncAPI: syncAPI, syncProfileServices: syncProfileServices, tabManager: tabManager), animated: true)
+              let syncWelcomeViewController = SyncWelcomeViewController(
+                syncAPI: syncAPI,
+                syncProfileServices: syncProfileServices,
+                tabManager: tabManager,
+                windowProtection: windowProtection)
+              
+              self.navigationController?.pushViewController(syncWelcomeViewController, animated: true)
             }
-          }, image: UIImage(named: "settings-sync", in: .module, compatibleWith: nil)!.template, accessory: .disclosureIndicator,
+          }, image: UIImage(braveSystemNamed: "leo.sync"), accessory: .disclosureIndicator,
           cellClass: MultilineValue1Cell.self),
-        .boolRow(title: Strings.bookmarksLastVisitedFolderTitle, option: Preferences.General.showLastVisitedBookmarksFolder, image: UIImage(named: "menu_folder_open", in: .module, compatibleWith: nil)!.template),
+        .boolRow(title: Strings.bookmarksLastVisitedFolderTitle, option: Preferences.General.showLastVisitedBookmarksFolder, image: UIImage(braveSystemNamed: "leo.folder.open-o")),
         Row(
           text: Strings.Shortcuts.shortcutSettingsTitle,
           selection: { [unowned self] in
             self.navigationController?.pushViewController(ShortcutSettingsViewController(), animated: true)
-          }, image: UIImage(named: "settings-siri-shortcuts", in: .module, compatibleWith: nil)!.template, accessory: .disclosureIndicator, cellClass: MultilineValue1Cell.self),
+          }, image: UIImage(braveSystemNamed: "leo.siri.shorcut"), accessory: .disclosureIndicator, cellClass: MultilineValue1Cell.self),
       ]
     )
 
@@ -313,7 +362,7 @@ class SettingsViewController: TableViewController {
         .boolRow(
           title: Strings.alwaysRequestDesktopSite,
           option: Preferences.General.alwaysRequestDesktopSite,
-          image: UIImage(named: "settings-desktop-always", in: .module, compatibleWith: nil)!.template)
+          image: UIImage(braveSystemNamed: "leo.window.cursor"))
       )
     }
 
@@ -321,11 +370,13 @@ class SettingsViewController: TableViewController {
       .boolRow(
         title: Strings.enablePullToRefresh,
         option: Preferences.General.enablePullToRefresh,
-        image: UIImage(named: "settings-pull-to-refresh", in: .module, compatibleWith: nil)!.template),
+        image: UIImage(braveSystemNamed: "leo.browser.refresh")),
       .boolRow(
         title: Strings.mediaAutoBackgrounding,
         option: Preferences.General.mediaAutoBackgrounding,
-        image: UIImage(named: "background_play_settings_icon", in: .module, compatibleWith: nil)!.template),
+        image: UIImage(braveSystemNamed: "leo.audio.active")),
+      .boolRow(title: Strings.blockPopups, option: Preferences.General.blockPopups,
+               image: UIImage(braveSystemNamed: "leo.shield.block")),
     ])
 
     let websiteRedirectsRow = Row(
@@ -333,8 +384,24 @@ class SettingsViewController: TableViewController {
       selection: { [unowned self] in
         let controller = UIHostingController(rootView: WebsiteRedirectsSettingsView())
         self.navigationController?.pushViewController(controller, animated: true)
-      }, image: UIImage(named: "settings-website-redirects", in: .module, compatibleWith: nil)!.template, accessory: .disclosureIndicator, cellClass: MultilineSubtitleCell.self)
+      }, image: UIImage(braveSystemNamed: "leo.swap.horizontal"), accessory: .disclosureIndicator, cellClass: MultilineSubtitleCell.self)
     general.rows.append(websiteRedirectsRow)
+    
+    var youtubeQualityRow = Row(text: Strings.youtubeMediaQuality, detailText: Strings.youtubeMediaQualityDetails, image: UIImage(braveSystemNamed: "leo.headphones"), accessory: .disclosureIndicator, cellClass: MultilineValue1Cell.self)
+    
+    youtubeQualityRow.selection = { [unowned self] in
+      let optionsViewController = OptionSelectionViewController<YoutubeHighQualityPreference>(
+        options: YoutubeHighQualityPreference.allCases,
+        selectedOption: YoutubeHighQualityPreference(rawValue: Preferences.General.youtubeHighQuality.value),
+        optionChanged: { _, option in
+          Preferences.General.youtubeHighQuality.value = option.rawValue
+          self.dataSource.reloadCell(row: youtubeQualityRow, section: general, displayText: option.displayString)
+        }
+      )
+      optionsViewController.headerText = Strings.youtubeMediaQualitySettingsTitle
+      self.navigationController?.pushViewController(optionsViewController, animated: true)
+    }
+    general.rows.append(youtubeQualityRow)
 
     return general
   }()
@@ -352,7 +419,7 @@ class SettingsViewController: TableViewController {
       tabs.rows.append(
         Row(
           text: Strings.showTabsBar,
-          image: UIImage(named: "settings-show-tab-bar", in: .module, compatibleWith: nil)!.template,
+          image: UIImage(braveSystemNamed: "leo.window.tab"),
           accessory: .switchToggle(value: Preferences.General.tabBarVisibility.value != TabBarVisibility.never.rawValue, {
             Preferences.General.tabBarVisibility.value = $0 ? TabBarVisibility.always.rawValue : TabBarVisibility.never.rawValue
           }),
@@ -360,7 +427,7 @@ class SettingsViewController: TableViewController {
         )
       )
     } else {
-      var row = Row(text: Strings.showTabsBar, detailText: TabBarVisibility(rawValue: Preferences.General.tabBarVisibility.value)?.displayString, image: UIImage(named: "settings-show-tab-bar", in: .module, compatibleWith: nil)!.template, accessory: .disclosureIndicator, cellClass: MultilineValue1Cell.self)
+      var row = Row(text: Strings.showTabsBar, detailText: TabBarVisibility(rawValue: Preferences.General.tabBarVisibility.value)?.displayString, image: UIImage(braveSystemNamed: "leo.window.tab"), accessory: .disclosureIndicator, cellClass: MultilineValue1Cell.self)
       row.selection = { [unowned self] in
         // Show options for tab bar visibility
         let optionsViewController = OptionSelectionViewController<TabBarVisibility>(
@@ -383,7 +450,7 @@ class SettingsViewController: TableViewController {
     var autoCloseTabsRow =
     Row(
       text: Strings.Settings.autocloseTabsSetting,
-      detailText: autoCloseSetting, image: UIImage(named: "settings-autoclose-tabs", in: .module, compatibleWith: nil)!.template,
+      detailText: autoCloseSetting, image: UIImage(braveSystemNamed: "leo.window.tabs"),
       accessory: .disclosureIndicator,
       cellClass: MultilineSubtitleCell.self)
     autoCloseTabsRow.selection = { [unowned self] in
@@ -413,7 +480,7 @@ class SettingsViewController: TableViewController {
     )
 
     let themeSubtitle = DefaultTheme(rawValue: Preferences.General.themeNormalMode.value)?.displayString
-    var row = Row(text: Strings.themesDisplayBrightness, detailText: themeSubtitle, image: UIImage(named: "settings-appearance", in: .module, compatibleWith: nil)!.template, accessory: .disclosureIndicator, cellClass: MultilineSubtitleCell.self)
+    var row = Row(text: Strings.themesDisplayBrightness, detailText: themeSubtitle, image: UIImage(braveSystemNamed: "leo.appearance"), accessory: .disclosureIndicator, cellClass: MultilineSubtitleCell.self)
     row.selection = { [unowned self] in
       let optionsViewController = OptionSelectionViewController<DefaultTheme>(
         options: DefaultTheme.normalThemesOptions,
@@ -436,7 +503,7 @@ class SettingsViewController: TableViewController {
             onValueChange: { [unowned self] enabled in
               NightModeScriptHandler.setNightMode(tabManager: tabManager, enabled: enabled)
             },
-            image: UIImage(systemName: "moon"))
+            image: UIImage(braveSystemNamed: "leo.theme.dark"))
         ],
         footer: .title(Strings.NightMode.sectionDescription)
       )
@@ -450,7 +517,7 @@ class SettingsViewController: TableViewController {
       selection: { [unowned self] in
         self.navigationController?.pushViewController(NTPTableViewController(), animated: true)
       },
-      image: UIImage(named: "settings-ntp", in: .module, compatibleWith: nil)!.template,
+      image: UIImage(braveSystemNamed: "leo.window.tab-new"),
       accessory: .disclosureIndicator,
       cellClass: MultilineValue1Cell.self
     ))
@@ -463,7 +530,7 @@ class SettingsViewController: TableViewController {
               let controller = PageZoomSettingsController()
               self?.navigationController?.pushViewController(controller, animated: true)
             },
-            image: UIImage(named: "settings-page-zoom", in: .module, compatibleWith: nil)!.template,
+            image: UIImage(braveSystemNamed: "leo.font.size"),
             accessory: .disclosureIndicator,
             cellClass: MultilineValue1Cell.self)
       )
@@ -473,11 +540,11 @@ class SettingsViewController: TableViewController {
       .boolRow(
         title: Strings.showBookmarkButtonInTopToolbar,
         option: Preferences.General.showBookmarkToolbarShortcut,
-        image: UIImage(named: "settings-bookmarks-shortcut", in: .module, compatibleWith: nil)!.template),
+        image: UIImage(braveSystemNamed: "leo.product.bookmarks")),
       .boolRow(
         title: Strings.hideRewardsIcon,
         option: Preferences.Rewards.hideRewardsIcon,
-        image: UIImage(named: "settings-rewards-icon", in: .module, compatibleWith: nil)!.template),
+        image: UIImage(braveSystemNamed: "leo.product.bat-outline")),
     ])
 
     return display
@@ -523,7 +590,7 @@ class SettingsViewController: TableViewController {
 
         guard let vcToShow = vc else { return }
         self.navigationController?.pushViewController(vcToShow, animated: true)
-      }, image: UIImage(named: "settings-vpn", in: .module, compatibleWith: nil)!.template, accessory: .disclosureIndicator,
+      }, image: UIImage(braveSystemNamed: "leo.product.vpn"), accessory: .disclosureIndicator,
       cellClass: ColoredDetailCell.self, context: [ColoredDetailCell.colorKey: color], uuid: "vpnrow")
   }
 
@@ -531,7 +598,7 @@ class SettingsViewController: TableViewController {
     return Section(
       header: .title(Strings.security),
       rows: [
-        .boolRow(title: Strings.browserLock, detailText: Strings.browserLockDescription, option: Preferences.Privacy.lockWithPasscode, image: UIImage(named: "settings-passcode", in: .module, compatibleWith: nil)!.template),
+        .boolRow(title: Strings.browserLock, detailText: Strings.browserLockDescription, option: Preferences.Privacy.lockWithPasscode, image: UIImage(braveSystemNamed: "leo.biometric.login")),
         Row(
           text: Strings.Login.loginListNavigationTitle,
           selection: { [unowned self] in
@@ -540,7 +607,7 @@ class SettingsViewController: TableViewController {
               windowProtection: self.windowProtection)
             loginsPasswordsViewController.settingsDelegate = self.settingsDelegate
             self.navigationController?.pushViewController(loginsPasswordsViewController, animated: true)
-          }, image: UIImage(named: "settings-save-logins", in: .module, compatibleWith: nil)!.template, accessory: .disclosureIndicator),
+          }, image: UIImage(braveSystemNamed: "leo.outside"), accessory: .disclosureIndicator),
       ]
     )
   }()
@@ -552,10 +619,10 @@ class SettingsViewController: TableViewController {
         Row(
           text: Strings.reportABug,
           selection: { [unowned self] in
-            self.settingsDelegate?.settingsOpenURLInNewTab(BraveUX.braveCommunityURL)
+            self.settingsDelegate?.settingsOpenURLInNewTab(.brave.community)
             self.dismiss(animated: true)
           },
-          image: UIImage(named: "settings-report-bug", in: .module, compatibleWith: nil)!.template,
+          image: UIImage(braveSystemNamed: "leo.bug"),
           cellClass: MultilineValue1Cell.self),
         Row(
           text: Strings.rateBrave,
@@ -566,7 +633,7 @@ class SettingsViewController: TableViewController {
             UIApplication.shared.open(writeReviewURL)
             self.dismiss(animated: true)
           },
-          image: UIImage(named: "settings-rate", in: .module, compatibleWith: nil)!.template,
+          image: UIImage(braveSystemNamed: "leo.comment.smile-square"),
           cellClass: MultilineValue1Cell.self),
       ]
     )
@@ -609,7 +676,7 @@ class SettingsViewController: TableViewController {
           text: Strings.privacyPolicy,
           selection: { [unowned self] in
             // Show privacy policy
-            let privacy = SettingsContentViewController().then { $0.url = BraveUX.bravePrivacyURL }
+            let privacy = SettingsContentViewController().then { $0.url = .brave.privacy }
             self.navigationController?.pushViewController(privacy, animated: true)
           },
           accessory: .disclosureIndicator, cellClass: MultilineValue1Cell.self),
@@ -617,7 +684,7 @@ class SettingsViewController: TableViewController {
           text: Strings.termsOfUse,
           selection: { [unowned self] in
             // Show terms of use
-            let toc = SettingsContentViewController().then { $0.url = BraveUX.braveTermsOfUseURL }
+            let toc = SettingsContentViewController().then { $0.url = .brave.termsOfUse }
             self.navigationController?.pushViewController(toc, animated: true)
           },
           accessory: .disclosureIndicator, cellClass: MultilineValue1Cell.self),
@@ -728,13 +795,15 @@ class SettingsViewController: TableViewController {
   }()
 
   private func setUpSections() {
-    var copyOfSections = self.sections
-    if let featureSectionIndex = self.sections.firstIndex(where: {
+    var copyOfSections = self.makeSections()
+    
+    if let featureSectionIndex = copyOfSections.firstIndex(where: {
       $0.uuid == self.featureSectionUUID.uuidString
     }) {
       let walletRowIndex = copyOfSections[featureSectionIndex].rows.firstIndex(where: {
         $0.uuid == self.walletRowUUID.uuidString
       })
+      
       if walletRowIndex == nil {
         let settingsStore = cryptoStore?.settingsStore
         copyOfSections[featureSectionIndex].rows.append(
@@ -744,8 +813,7 @@ class SettingsViewController: TableViewController {
               let web3SettingsView = Web3SettingsView(
                 settingsStore: settingsStore,
                 networkStore: cryptoStore?.networkStore,
-                keyringStore: keyringStore,
-                ipfsAPI: ipfsAPI
+                keyringStore: keyringStore
               ).environment(\.openURL, .init(handler: { [weak self] url in
                 guard let self = self else { return .discarded }
                 (self.presentingViewController ?? self).dismiss(animated: true) { [self] in
@@ -756,7 +824,7 @@ class SettingsViewController: TableViewController {
               let vc = UIHostingController(rootView: web3SettingsView)
               self.navigationController?.pushViewController(vc, animated: true)
             },
-            image: UIImage(named: "menu-crypto", in: .module, compatibleWith: nil)!.template,
+            image: UIImage(braveSystemNamed: "leo.product.brave-wallet"),
             accessory: .disclosureIndicator,
             uuid: self.walletRowUUID.uuidString)
         )

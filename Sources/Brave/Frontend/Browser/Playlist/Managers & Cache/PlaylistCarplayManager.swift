@@ -9,14 +9,14 @@ import MediaPlayer
 import CarPlay
 import Shared
 import Data
-import BraveShared
+import Preferences
 import os.log
 
 /// Lightweight class that manages a single MediaPlayer item
 /// The MediaPlayer is then passed to any controller that needs to use it.
 public class PlaylistCarplayManager: NSObject {
   private var carPlayStatusObservers = [Any]()
-  private weak var mediaPlayer: MediaPlayer?
+  private(set) weak var mediaPlayer: MediaPlayer?
   private(set) var isCarPlayAvailable = false
 
   private var carPlayController: PlaylistCarplayController?

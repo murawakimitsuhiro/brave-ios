@@ -35,6 +35,10 @@ class BraveWebView: WKWebView {
 
     super.init(frame: frame, configuration: configuration)
 
+    if #available(iOS 16.0, *) {
+      isFindInteractionEnabled = true
+    }
+    
     customUserAgent = UserAgent.userAgentForDesktopMode
 #if compiler(>=5.8)
     if #available(iOS 16.4, *) {
@@ -55,5 +59,16 @@ class BraveWebView: WKWebView {
   override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
     lastHitPoint = point
     return super.hitTest(point, with: event)
+  }
+}
+
+extension WKWebView {
+  public var sessionData: Data? {
+    get {
+      interactionState as? Data
+    }
+    set {
+      interactionState = newValue
+    }
   }
 }

@@ -10,7 +10,7 @@ import CoreData
 
 import Shared
 import Data
-import BraveShared
+import Preferences
 import os.log
 
 public class PlaylistManager: NSObject {
@@ -20,6 +20,19 @@ public class PlaylistManager: NSObject {
   private let downloadManager = PlaylistDownloadManager()
   private var frc = PlaylistItem.frc()
   private var didRestoreSession = false
+  
+  private var _playbackTask: Task<Void, Error>?
+  
+  var playbackTask: Task<Void, Error>? {
+    get {
+      _playbackTask
+    }
+    
+    set(newValue) {
+      _playbackTask?.cancel()
+      _playbackTask = newValue
+    }
+  }
 
   // Observers
   private let onContentWillChange = PassthroughSubject<Void, Never>()
@@ -117,6 +130,12 @@ public class PlaylistManager: NSObject {
 
   var fetchedObjects: [PlaylistItem] {
     frc.fetchedObjects ?? []
+  }
+  
+  func updateLastPlayed(item: PlaylistInfo, playTime: Double) {
+    let lastPlayedTime = Preferences.Playlist.playbackLeftOff.value ? playTime : 0.0
+    Preferences.Playlist.lastPlayedItemUrl.value = item.pageSrc
+    PlaylistItem.updateLastPlayed(itemId: item.tagId, pageSrc: item.pageSrc, lastPlayedOffset: lastPlayedTime)
   }
 
   func itemAtIndex(_ index: Int) -> PlaylistInfo? {
@@ -241,12 +260,25 @@ public class PlaylistManager: NSObject {
       }
     }
   }
+  
+  public func setupPlaylistFolder() {
+    if let savedFolder = PlaylistFolder.getFolder(uuid: PlaylistFolder.savedFolderUUID) {
+      if savedFolder.title != Strings.PlaylistFolders.playlistSavedFolderTitle {
+        // This title may change so we should update it
+        savedFolder.title = Strings.PlaylistFolders.playlistSavedFolderTitle
+      }
+    } else {
+      PlaylistFolder.addFolder(title: Strings.PlaylistFolders.playlistSavedFolderTitle, uuid: PlaylistFolder.savedFolderUUID) { uuid in
+        Logger.module.debug("Created Playlist Folder: \(uuid)")
+      }
+    }
+  }
 
   func download(item: PlaylistInfo) {
     guard downloadManager.downloadTask(for: item.tagId) == nil, let assetUrl = URL(string: item.src) else { return }
-
-    PlaylistMediaStreamer.getMimeType(assetUrl) { [weak self] mimeType in
-      guard let self = self, let mimeType = mimeType?.lowercased() else { return }
+    Task {
+      let mimeType = await PlaylistMediaStreamer.getMimeType(assetUrl)
+      guard let mimeType = mimeType?.lowercased() else { return }
 
       if mimeType.contains("x-mpegurl") || mimeType.contains("application/vnd.apple.mpegurl") || mimeType.contains("mpegurl") {
         DispatchQueue.main.async {
@@ -432,8 +464,7 @@ public class PlaylistManager: NSObject {
               includingPropertiesForKeys: nil,
               options: [.skipsHiddenFiles])
             assets.forEach({
-              if let item = PlaylistItem.cachedItem(cacheURL: $0),
-                 let itemId = item.uuid {
+              if let item = PlaylistItem.cachedItem(cacheURL: $0), let itemId = item.uuid {
                 self.cancelDownload(itemId: itemId)
                 PlaylistItem.updateCache(uuid: itemId, cachedData: nil)
               }
@@ -700,10 +731,12 @@ extension PlaylistManager {
               pageTitle: item.pageTitle,
               mimeType: item.mimeType,
               duration: duration.seconds,
+              lastPlayedOffset: 0.0,
               detected: item.detected,
               dateAdded: item.dateAdded,
               tagId: item.tagId,
-              order: item.order)
+              order: item.order,
+              isInvisible: item.isInvisible)
 
             if PlaylistItem.itemExists(uuid: item.tagId) || PlaylistItem.itemExists(pageSrc: item.pageSrc) {
               PlaylistItem.updateItem(newItem) {
@@ -727,7 +760,7 @@ extension PlaylistManager {
   @MainActor
   static func syncSharedFolder(sharedFolderUrl: String) async throws {
     guard let folder = PlaylistFolder.getSharedFolder(sharedFolderUrl: sharedFolderUrl),
-          let folderId = folder.sharedFolderId else {
+          let folderId = folder.uuid else {
       return
     }
     
@@ -741,7 +774,7 @@ extension PlaylistManager {
     
     if !newItems.isEmpty {
       await withCheckedContinuation { continuation in
-        PlaylistItem.updateItems(Array(newItems), folderUUID: folderId) {
+        PlaylistItem.updateItems(Array(newItems), folderUUID: folderId, newETag: model.eTag) {
           continuation.resume()
         }
       }

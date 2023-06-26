@@ -5,7 +5,9 @@
 
 import Foundation
 import Shared
-import BraveShared
+import BraveStrings
+import BraveShields
+import Preferences
 import BraveUI
 import UIKit
 
@@ -79,21 +81,21 @@ class BraveShieldStatsView: SpringButton {
 
   private lazy var adsStatView: StatView = {
     let statView = StatView(frame: CGRect.zero)
-    statView.title = Strings.shieldsAdAndTrackerStats.capitalized
+    statView.title = Strings.Shields.shieldsAdAndTrackerStats.capitalized
     statView.color = .statsAdsBlockedTint
     return statView
   }()
   
   private lazy var dataSavedStatView: StatView = {
     let statView = StatView(frame: .zero)
-    statView.title = Strings.dataSavedStat
+    statView.title = Strings.Shields.dataSavedStat
     statView.color = .statsDataSavedTint
     return statView
   }()
   
   private lazy var timeStatView: StatView = {
     let statView = StatView(frame: .zero)
-    statView.title = Strings.shieldsTimeStats
+    statView.title = Strings.Shields.shieldsTimeStats
     statView.color = .statsTimeSavedTint
     return statView
   }()
@@ -167,7 +169,7 @@ class BraveShieldStatsView: SpringButton {
             
       let hidePrivacyHub = UIAction(
         title: Strings.PrivacyHub.hidePrivacyHubWidgetActionTitle,
-        image: UIImage(braveSystemNamed: "brave.eye.slash"),
+        image: UIImage(braveSystemNamed: "leo.eye.off"),
         handler: UIAction.deferredActionHandler { [unowned self] _ in
           self.hidePrivacyHubPressed?()
         })

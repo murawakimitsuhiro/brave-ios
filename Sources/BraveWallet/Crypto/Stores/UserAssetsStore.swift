@@ -6,46 +6,36 @@
 import Foundation
 import BraveCore
 import Combine
+import Data
 
 public class AssetStore: ObservableObject, Equatable {
   @Published var token: BraveWallet.BlockchainToken
   @Published var isVisible: Bool {
     didSet {
-      if isCustomToken {
-        walletService.setUserAssetVisible(
-          token,
-          visible: isVisible
-        ) { _ in }
-      } else {
-        if isVisible {
-          walletService.addUserAsset(token) { _ in }
-        } else {
-          walletService.removeUserAsset(token) { _ in }
-        }
-      }
+      assetManager.updateUserAsset(for: token, visible: isVisible, completion: nil)
     }
   }
   var network: BraveWallet.NetworkInfo
 
-  private let walletService: BraveWalletBraveWalletService
   private let rpcService: BraveWalletJsonRpcService
-  private let ipfsApi: IpfsAPI?
+  private let ipfsApi: IpfsAPI
+  private let assetManager: WalletUserAssetManagerType
   private(set) var isCustomToken: Bool
 
   init(
-    walletService: BraveWalletBraveWalletService,
     rpcService: BraveWalletJsonRpcService,
     network: BraveWallet.NetworkInfo,
     token: BraveWallet.BlockchainToken,
-    ipfsApi: IpfsAPI?,
+    ipfsApi: IpfsAPI,
+    userAssetManager: WalletUserAssetManagerType,
     isCustomToken: Bool,
     isVisible: Bool
   ) {
-    self.walletService = walletService
     self.rpcService = rpcService
     self.network = network
     self.token = token
     self.ipfsApi = ipfsApi
+    self.assetManager = userAssetManager
     self.isCustomToken = isCustomToken
     self.isVisible = isVisible
   }
@@ -62,49 +52,49 @@ public class AssetStore: ObservableObject, Equatable {
 public class UserAssetsStore: ObservableObject {
   @Published private(set) var assetStores: [AssetStore] = []
   @Published var isSearchingToken: Bool = false
+  @Published var networkFilters: [Selectable<BraveWallet.NetworkInfo>] = [] {
+    didSet {
+      guard !oldValue.isEmpty else { return } // initial assignment to `networkFilters`
+      update()
+    }
+  }
 
-  private let walletService: BraveWalletBraveWalletService
   private let blockchainRegistry: BraveWalletBlockchainRegistry
   private let rpcService: BraveWalletJsonRpcService
   private let keyringService: BraveWalletKeyringService
   private let assetRatioService: BraveWalletAssetRatioService
-  private let ipfsApi: IpfsAPI?
+  private let ipfsApi: IpfsAPI
+  private let assetManager: WalletUserAssetManagerType
   private var allTokens: [BraveWallet.BlockchainToken] = []
   private var timer: Timer?
 
   public init(
-    walletService: BraveWalletBraveWalletService,
     blockchainRegistry: BraveWalletBlockchainRegistry,
     rpcService: BraveWalletJsonRpcService,
     keyringService: BraveWalletKeyringService,
     assetRatioService: BraveWalletAssetRatioService,
-    ipfsApi: IpfsAPI?
+    ipfsApi: IpfsAPI,
+    userAssetManager: WalletUserAssetManagerType
   ) {
-    self.walletService = walletService
     self.blockchainRegistry = blockchainRegistry
     self.rpcService = rpcService
     self.keyringService = keyringService
     self.assetRatioService = assetRatioService
     self.ipfsApi = ipfsApi
+    self.assetManager = userAssetManager
     self.keyringService.add(self)
-  }
-  
-  @Published var networkFilter: NetworkFilter = .allNetworks {
-    didSet {
-      update()
-    }
   }
   
   func update() {
     Task { @MainActor in
-      let networks: [BraveWallet.NetworkInfo]
-      switch networkFilter {
-      case .allNetworks:
-        networks = await self.rpcService.allNetworksForSupportedCoins()
-      case let .network(network):
-        networks = [network]
+      // setup network filters if not currently setup
+      if self.networkFilters.isEmpty {
+        self.networkFilters = await self.rpcService.allNetworksForSupportedCoins().map {
+          .init(isSelected: true, model: $0)
+        }
       }
-      let allUserAssets = await self.walletService.allUserAssets(in: networks)
+      let networks: [BraveWallet.NetworkInfo] = self.networkFilters.filter(\.isSelected).map(\.model)
+      let allUserAssets = assetManager.getAllUserAssetsInNetworkAssets(networks: networks)
       var allTokens = await self.blockchainRegistry.allTokens(in: networks)
       // Filter `allTokens` to remove any tokens existing in `allUserAssets`. This is possible for ERC721 tokens in the registry without a `tokenId`, which requires the user to add as a custom token
       let allUserTokens = allUserAssets.flatMap(\.tokens)
@@ -133,11 +123,11 @@ public class UserAssetsStore: ObservableObject {
             })
           }
           return AssetStore(
-            walletService: walletService,
             rpcService: rpcService,
             network: assetsForNetwork.network,
             token: token,
             ipfsApi: self.ipfsApi,
+            userAssetManager: assetManager,
             isCustomToken: isCustomToken,
             isVisible: visibleIds.contains(where: { $0 == (token.id + token.chainId) })
           )
@@ -150,20 +140,20 @@ public class UserAssetsStore: ObservableObject {
     _ asset: BraveWallet.BlockchainToken,
     completion: @escaping (_ success: Bool) -> Void
   ) {
-    walletService.addUserAsset(asset) { [weak self] success in
-      if success {
+    if assetManager.getUserAsset(asset) != nil {
+      completion(false)
+    } else {
+      assetManager.addUserAsset(asset) { [weak self] in
         self?.update()
+        completion(true)
       }
-      completion(success)
     }
   }
 
   func removeUserAsset(token: BraveWallet.BlockchainToken, completion: @escaping (_ success: Bool) -> Void) {
-    walletService.removeUserAsset(token) { [weak self] success in
-      if success {
-        self?.update()
-      }
-      completion(success)
+    assetManager.removeUserAsset(token) { [weak self] in
+      self?.update()
+      completion(true)
     }
   }
 
@@ -200,7 +190,7 @@ public class UserAssetsStore: ObservableObject {
   
   @MainActor func allAssets() async -> [AssetViewModel] {
     let allNetworks = await rpcService.allNetworksForSupportedCoins()
-    let allUserAssets = await walletService.allUserAssets(in: allNetworks)
+    let allUserAssets = assetManager.getAllUserAssetsInNetworkAssets(networks: allNetworks)
     // Filter `allTokens` to remove any tokens existing in `allUserAssets`. This is possible for ERC721 tokens in the registry without a `tokenId`, which requires the user to add as a custom token
     let allUserTokens = allUserAssets.flatMap(\.tokens)
     let allBlockchainTokens = await blockchainRegistry.allTokens(in: allNetworks)
@@ -228,7 +218,7 @@ public class UserAssetsStore: ObservableObject {
   
   @MainActor func allNFTMetadata() async -> [String: NFTMetadata] {
     let allNetworks = await rpcService.allNetworksForSupportedCoins()
-    let allUserAssets = await walletService.allUserAssets(in: allNetworks)
+    let allUserAssets = assetManager.getAllUserAssetsInNetworkAssets(networks: allNetworks)
     // Filter `allTokens` to remove any tokens existing in `allUserAssets`. This is possible for ERC721 tokens in the registry without a `tokenId`, which requires the user to add as a custom token
     let allUserTokens = allUserAssets.flatMap(\.tokens)
     
@@ -269,6 +259,34 @@ extension UserAssetsStore: BraveWalletKeyringServiceObserver {
   public func selectedAccountChanged(_ coin: BraveWallet.CoinType) {
   }
   
-  public func accountsAdded(_ coin: BraveWallet.CoinType, addresses: [String]) {
+  public func accountsAdded(_ addedAccounts: [BraveWallet.AccountInfo]) {
   }
+}
+
+extension UserAssetsStore: BraveWalletBraveWalletServiceObserver {
+  public func onActiveOriginChanged(_ originInfo: BraveWallet.OriginInfo) { }
+  
+  public func onDefaultEthereumWalletChanged(_ wallet: BraveWallet.DefaultWallet) { }
+  
+  public func onDefaultSolanaWalletChanged(_ wallet: BraveWallet.DefaultWallet) { }
+  
+  public func onDefaultBaseCurrencyChanged(_ currency: String) { }
+  
+  public func onDefaultBaseCryptocurrencyChanged(_ cryptocurrency: String) { }
+  
+  public func onNetworkListChanged() {
+    Task { @MainActor in
+      // A network was added or removed, update our network filters for the change.
+      self.networkFilters = await self.rpcService.allNetworksForSupportedCoins().map { network in
+        let existingSelectionValue = self.networkFilters.first(where: { $0.model.chainId == network.chainId})?.isSelected
+        return .init(isSelected: existingSelectionValue ?? true, model: network)
+      }
+    }
+  }
+  
+  public func onDiscoverAssetsStarted() { }
+  
+  public func onDiscoverAssetsCompleted(_ discoveredAssets: [BraveWallet.BlockchainToken]) { }
+  
+  public func onResetWallet() { }
 }

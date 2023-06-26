@@ -5,7 +5,7 @@
 
 import UIKit
 import BraveCore
-import BraveShared
+import Preferences
 import Shared
 import Static
 import CoreServices
@@ -16,12 +16,10 @@ private typealias EnvironmentOverride = Preferences.Rewards.EnvironmentOverride
 class RewardsDebugSettingsViewController: TableViewController {
 
   let rewards: BraveRewards
-  let legacyWallet: BraveLedger?
   private var adsInfo: (viewed: Int, amount: Double, paymentDate: Date?)?
 
-  init(rewards: BraveRewards, legacyWallet: BraveLedger?) {
+  init(rewards: BraveRewards) {
     self.rewards = rewards
-    self.legacyWallet = legacyWallet
 
     super.init(style: .grouped)
 
@@ -188,28 +186,6 @@ class RewardsDebugSettingsViewController: TableViewController {
         ]
       ),
       Section(
-        header: .title("Legacy Wallet"),
-        rows: [
-          Row(
-            text: "Internals",
-            selection: { [unowned self] in
-              guard let legacyWallet = legacyWallet else {
-                let alert = UIAlertController(title: "Legacy Wallet", message: "No Wallet Found. Use \"Create Legacy Wallet\" action below to duplicate the current wallet", preferredStyle: .alert)
-                alert.addAction(.init(title: "OK", style: .default, handler: nil))
-                self.present(alert, animated: true)
-                return
-              }
-              let controller = RewardsInternalsDebugViewController(ledger: legacyWallet)
-              self.navigationController?.pushViewController(controller, animated: true)
-            }, accessory: .disclosureIndicator),
-          Row(
-            text: "Create Legacy Wallet",
-            selection: { [unowned self] in
-              self.createLegacyLedger()
-            }, cellClass: ButtonCell.self),
-        ]
-      ),
-      Section(
         header: .title("Ads"),
         rows: [
           Row(text: "Dismissal Timer", detailText: "Number of seconds before an ad is automatically dismissed. 0 = Default", accessory: .view(adsDismissalTextField), cellClass: MultilineSubtitleCell.self),
@@ -267,7 +243,7 @@ class RewardsDebugSettingsViewController: TableViewController {
 
   private func fetchAndClaimPromotions() async {
     guard let ledger = rewards.ledger else { return }
-    let activePromotions: [Ledger.Promotion] = await withCheckedContinuation { c in
+    let activePromotions: [BraveCore.BraveRewards.Promotion] = await withCheckedContinuation { c in
       ledger.fetchPromotions { promotions in
         c.resume(returning: promotions.filter { $0.status == .active })
       }

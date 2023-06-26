@@ -5,7 +5,7 @@
 import UIKit
 import Shared
 import SnapKit
-import BraveShared
+import Preferences
 import Combine
 import BraveCore
 import DesignSystem
@@ -16,10 +16,12 @@ protocol TabLocationViewDelegate {
   func tabLocationViewDidTapReaderMode(_ tabLocationView: TabLocationView)
   func tabLocationViewDidBeginDragInteraction(_ tabLocationView: TabLocationView)
   func tabLocationViewDidTapPlaylist(_ tabLocationView: TabLocationView)
+  func tabLocationViewDidTapPlaylistMenuAction(_ tabLocationView: TabLocationView, action: PlaylistURLBarButton.MenuAction)
   func tabLocationViewDidTapLockImageView(_ tabLocationView: TabLocationView)
   func tabLocationViewDidTapReload(_ tabLocationView: TabLocationView)
   func tabLocationViewDidLongPressReload(_ tabLocationView: TabLocationView, from button: UIButton)
   func tabLocationViewDidTapStop(_ tabLocationView: TabLocationView)
+  func tabLocationViewDidTapVoiceSearch(_ tabLocationView: TabLocationView)
   func tabLocationViewDidTapShieldsButton(_ urlBar: TabLocationView)
   func tabLocationViewDidTapRewardsButton(_ urlBar: TabLocationView)
   func tabLocationViewDidLongPressRewardsButton(_ urlBar: TabLocationView)
@@ -48,7 +50,7 @@ class TabLocationView: UIView {
   var url: URL? {
     didSet {
       updateLockImageView()
-      updateTextWithURL()
+      updateURLBarWithText()
       setNeedsUpdateConstraints()
     }
   }
@@ -65,7 +67,7 @@ class TabLocationView: UIView {
         reloadButton.setImage(UIImage(systemName: "xmark"), for: .normal)
         reloadButton.accessibilityLabel = Strings.tabToolbarStopButtonAccessibilityLabel
       } else {
-        reloadButton.setImage(UIImage(braveSystemNamed: "brave.refresh"), for: .normal)
+        reloadButton.setImage(UIImage(braveSystemNamed: "leo.browser.refresh"), for: .normal)
         reloadButton.accessibilityLabel = Strings.tabToolbarReloadButtonAccessibilityLabel
       }
     }
@@ -78,7 +80,7 @@ class TabLocationView: UIView {
     case .localHost:
       lockImageView.isHidden = true
     case .insecure:
-      lockImageView.setImage(UIImage(braveSystemNamed: "brave.exclamationmark.circle.fill")?
+      lockImageView.setImage(UIImage(braveSystemNamed: "leo.info.filled")?
         .withRenderingMode(.alwaysOriginal)
         .withTintColor(.braveErrorLabel), for: .normal)
       lockImageView.accessibilityLabel = Strings.tabToolbarWarningImageAccessibilityLabel
@@ -152,7 +154,7 @@ class TabLocationView: UIView {
     return urlTextField
   }()
 
-  private(set) lazy var lockImageView = ToolbarButton(top: true).then {
+  private(set) lazy var lockImageView = ToolbarButton().then {
     $0.setImage(UIImage(braveSystemNamed: "brave.lock.alt", compatibleWith: nil), for: .normal)
     $0.isHidden = true
     $0.tintColor = .braveLabel
@@ -166,14 +168,14 @@ class TabLocationView: UIView {
 
   private(set) lazy var readerModeButton: ReaderModeButton = {
     let readerModeButton = ReaderModeButton(frame: .zero)
-    readerModeButton.addTarget(self, action: #selector(tapReaderModeButton), for: .touchUpInside)
-    readerModeButton.addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(longPressReaderModeButton)))
+    readerModeButton.addTarget(self, action: #selector(didTapReaderModeButton), for: .touchUpInside)
+    readerModeButton.addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(didLongPressReaderModeButton)))
     readerModeButton.isAccessibilityElement = true
     readerModeButton.isHidden = true
     readerModeButton.imageView?.contentMode = .scaleAspectFit
     readerModeButton.accessibilityLabel = Strings.tabToolbarReaderViewButtonAccessibilityLabel
     readerModeButton.accessibilityIdentifier = "TabLocationView.readerModeButton"
-    readerModeButton.accessibilityCustomActions = [UIAccessibilityCustomAction(name: Strings.tabToolbarReaderViewButtonTitle, target: self, selector: #selector(readerModeCustomAction))]
+    readerModeButton.accessibilityCustomActions = [UIAccessibilityCustomAction(name: Strings.tabToolbarReaderViewButtonTitle, target: self, selector: #selector(didLongPressReaderModeCustomAction))]
     readerModeButton.unselectedTintColor = .braveLabel
     readerModeButton.selectedTintColor = .braveBlurpleTint
     return readerModeButton
@@ -182,34 +184,42 @@ class TabLocationView: UIView {
   private(set) lazy var playlistButton = PlaylistURLBarButton(frame: .zero).then {
     $0.accessibilityIdentifier = "TabToolbar.playlistButton"
     $0.isAccessibilityElement = true
-    $0.accessibilityLabel = Strings.tabToolbarPlaylistButtonAccessibilityLabel
     $0.buttonState = .none
     $0.tintColor = .white
-    $0.addTarget(self, action: #selector(didClickPlaylistButton), for: .touchUpInside)
+    $0.addTarget(self, action: #selector(didTapPlaylistButton), for: .touchUpInside)
   }
   
   private(set) lazy var walletButton = WalletURLBarButton(frame: .zero).then {
     $0.accessibilityIdentifier = "TabToolbar.walletButton"
     $0.isAccessibilityElement = true
     $0.buttonState = .inactive
-    $0.addTarget(self, action: #selector(tappedWalletButton), for: .touchUpInside)
+    $0.addTarget(self, action: #selector(didTapWalletButton), for: .touchUpInside)
   }
   
-  lazy var reloadButton = ToolbarButton(top: true).then {
+  lazy var reloadButton = ToolbarButton().then {
     $0.accessibilityIdentifier = "TabToolbar.stopReloadButton"
     $0.isAccessibilityElement = true
     $0.accessibilityLabel = Strings.tabToolbarReloadButtonAccessibilityLabel
-    $0.setImage(UIImage(braveSystemNamed: "brave.refresh", compatibleWith: nil), for: .normal)
+    $0.setImage(UIImage(braveSystemNamed: "leo.browser.refresh", compatibleWith: nil), for: .normal)
     $0.tintColor = .braveLabel
-    let longPressGestureStopReloadButton = UILongPressGestureRecognizer(target: self, action: #selector(didLongPressStopReload(_:)))
+    let longPressGestureStopReloadButton = UILongPressGestureRecognizer(target: self, action: #selector(didLongPressStopReloadButton(_:)))
     $0.addGestureRecognizer(longPressGestureStopReloadButton)
-    $0.addTarget(self, action: #selector(didClickStopReload), for: .touchUpInside)
+    $0.addTarget(self, action: #selector(didTapStopReloadButton), for: .touchUpInside)
+  }
+  
+  private lazy var voiceSearchButton = ToolbarButton().then {
+    $0.accessibilityIdentifier = "TabToolbar.voiceSearchButton"
+    $0.isAccessibilityElement = true
+    $0.accessibilityLabel = Strings.tabToolbarVoiceSearchButtonAccessibilityLabel
+    $0.setImage(UIImage(braveSystemNamed: "leo.microphone", compatibleWith: nil), for: .normal)
+    $0.tintColor = .braveLabel
+    $0.addTarget(self, action: #selector(didTapVoiceSearchButton), for: .touchUpInside)
   }
 
   lazy var shieldsButton: ToolbarButton = {
-    let button = ToolbarButton(top: true)
+    let button = ToolbarButton()
     button.setImage(UIImage(sharedNamed: "brave.logo"), for: .normal)
-    button.addTarget(self, action: #selector(didClickBraveShieldsButton), for: .touchUpInside)
+    button.addTarget(self, action: #selector(didTapBraveShieldsButton), for: .touchUpInside)
     button.imageView?.contentMode = .scaleAspectFit
     button.accessibilityLabel = Strings.bravePanel
     button.imageView?.adjustsImageSizeForAccessibilityContentSizeCategory = true
@@ -219,7 +229,7 @@ class TabLocationView: UIView {
 
   lazy var rewardsButton: RewardsButton = {
     let button = RewardsButton()
-    button.addTarget(self, action: #selector(didClickBraveRewardsButton), for: .touchUpInside)
+    button.addTarget(self, action: #selector(didTapBraveRewardsButton), for: .touchUpInside)
     let longPressGestureRewardsButton = UILongPressGestureRecognizer(target: self, action: #selector(didLongPressRewardsButton(_:)))
     button.addGestureRecognizer(longPressGestureRewardsButton)
     return button
@@ -245,16 +255,16 @@ class TabLocationView: UIView {
 
     self.tabObservers = registerFor(.didChangeContentBlocking, .didGainFocus, queue: .main)
 
-    longPressRecognizer = UILongPressGestureRecognizer(target: self, action: #selector(longPressLocation))
+    longPressRecognizer = UILongPressGestureRecognizer(target: self, action: #selector(didLongPressLocationBar))
     longPressRecognizer.delegate = self
 
-    tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(tapLocation))
+    tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(didTapLocationBar))
     tapRecognizer.delegate = self
 
     addGestureRecognizer(longPressRecognizer)
     addGestureRecognizer(tapRecognizer)
     
-    let optionSubviews = [readerModeButton, walletButton, playlistButton, reloadButton, separatorLine, shieldsButton, rewardsButton]
+    let optionSubviews = [readerModeButton, walletButton, playlistButton, voiceSearchButton, reloadButton, separatorLine, shieldsButton, rewardsButton]
     optionSubviews.forEach {
       ($0 as? UIButton)?.contentEdgeInsets = UIEdgeInsets(top: 0, left: 5, bottom: 0, right: 5)
       $0.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
@@ -264,7 +274,6 @@ class TabLocationView: UIView {
 
     // Visual centering
     rewardsButton.contentEdgeInsets = .init(top: 1, left: 5, bottom: 1, right: 5)
-    playlistButton.contentEdgeInsets = .init(top: 2, left: 10, bottom: 2, right: 6)
     
     urlTextField.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
@@ -293,6 +302,10 @@ class TabLocationView: UIView {
         self?.updateColors(isPrivateBrowsing)
       })
     
+    playlistButton.menuActionHandler = { [unowned self] action in
+      self.delegate?.tabLocationViewDidTapPlaylistMenuAction(self, action: action)
+    }
+    
     updateForTraitCollection()
   }
 
@@ -304,6 +317,15 @@ class TabLocationView: UIView {
     super.traitCollectionDidChange(previousTraitCollection)
     if previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
       updateForTraitCollection()
+    }
+  }
+  
+  override var accessibilityElements: [Any]? {
+    get {
+      return [lockImageView, urlTextField, readerModeButton, playlistButton, reloadButton, shieldsButton].filter { !$0.isHidden }
+    }
+    set {
+      super.accessibilityElements = newValue
     }
   }
   
@@ -338,83 +360,8 @@ class TabLocationView: UIView {
       backgroundColor = .braveBackground
     }
   }
-
-  override var accessibilityElements: [Any]? {
-    get {
-      return [lockImageView, urlTextField, readerModeButton, playlistButton, reloadButton, shieldsButton].filter { !$0.isHidden }
-    }
-    set {
-      super.accessibilityElements = newValue
-    }
-  }
-
-  @objc func didTapLockImageView() {
-    if !loading {
-      delegate?.tabLocationViewDidTapLockImageView(self)
-    }
-  }
-
-  @objc func tapReaderModeButton() {
-    delegate?.tabLocationViewDidTapReaderMode(self)
-  }
-
-  @objc func longPressReaderModeButton(_ recognizer: UILongPressGestureRecognizer) {
-    if recognizer.state == .began {
-      delegate?.tabLocationViewDidLongPressReaderMode(self)
-    }
-  }
-
-  @objc func didClickPlaylistButton() {
-    delegate?.tabLocationViewDidTapPlaylist(self)
-  }
-
-  @objc func didClickStopReload() {
-    if loading {
-      delegate?.tabLocationViewDidTapStop(self)
-    } else {
-      delegate?.tabLocationViewDidTapReload(self)
-    }
-  }
-
-  @objc func didLongPressStopReload(_ recognizer: UILongPressGestureRecognizer) {
-    if recognizer.state == .began && !loading {
-      delegate?.tabLocationViewDidLongPressReload(self, from: reloadButton)
-    }
-  }
-
-  @objc func longPressLocation(_ recognizer: UITapGestureRecognizer) {
-    if recognizer.state == .began {
-      delegate?.tabLocationViewDidLongPressLocation(self)
-    }
-  }
-
-  @objc func tapLocation(_ recognizer: UITapGestureRecognizer) {
-    delegate?.tabLocationViewDidTapLocation(self)
-  }
-
-  @objc func readerModeCustomAction() -> Bool {
-    return delegate?.tabLocationViewDidLongPressReaderMode(self) ?? false
-  }
-
-  @objc func didClickBraveShieldsButton() {
-    delegate?.tabLocationViewDidTapShieldsButton(self)
-  }
-
-  @objc func didClickBraveRewardsButton() {
-    delegate?.tabLocationViewDidTapRewardsButton(self)
-  }
-
-  @objc func didLongPressRewardsButton(_ gesture: UILongPressGestureRecognizer) {
-    if gesture.state == .began {
-      delegate?.tabLocationViewDidLongPressRewardsButton(self)
-    }
-  }
   
-  @objc func tappedWalletButton() {
-    delegate?.tabLocationViewDidTapWalletButton(self)
-  }
-  
-  fileprivate func updateTextWithURL() {
+  private func updateURLBarWithText() {
     (urlTextField as? DisplayTextField)?.hostString = url?.withoutWWW.host ?? ""
     
     // Note: Only use `URLFormatter.formatURLOrigin(forSecurityDisplay: url?.withoutWWW.absoluteString ?? "", schemeDisplay: .omitHttpAndHttps)`
@@ -426,6 +373,83 @@ class TabLocationView: UIView {
     // The requirement to remove scheme comes from Desktop. Also we do not remove the path like in other browsers either.
     // Therefore, we follow Brave Desktop instead of Chrome or Safari iOS
     urlTextField.text = URLFormatter.formatURL(url?.withoutWWW.absoluteString ?? "", formatTypes: [.omitDefaults], unescapeOptions: []).removeSchemeFromURLString(url?.scheme)
+    
+    reloadButton.isHidden = url == nil
+    voiceSearchButton.isHidden = url != nil
+  }
+
+  // MARK: Long Press Actions
+
+  @objc func didLongPressReaderModeButton(_ recognizer: UILongPressGestureRecognizer) {
+    if recognizer.state == .began {
+      delegate?.tabLocationViewDidLongPressReaderMode(self)
+    }
+  }
+  
+  @objc func didLongPressLocationBar(_ recognizer: UITapGestureRecognizer) {
+    if recognizer.state == .began {
+      delegate?.tabLocationViewDidLongPressLocation(self)
+    }
+  }
+  
+  @objc func didLongPressStopReloadButton(_ recognizer: UILongPressGestureRecognizer) {
+    if recognizer.state == .began && !loading {
+      delegate?.tabLocationViewDidLongPressReload(self, from: reloadButton)
+    }
+  }
+  
+  @objc func didLongPressReaderModeCustomAction() -> Bool {
+    return delegate?.tabLocationViewDidLongPressReaderMode(self) ?? false
+  }
+  
+  @objc func didLongPressRewardsButton(_ gesture: UILongPressGestureRecognizer) {
+    if gesture.state == .began {
+      delegate?.tabLocationViewDidLongPressRewardsButton(self)
+    }
+  }
+  
+  // MARK: Tap Actions
+  
+  @objc func didTapLockImageView() {
+    if !loading {
+      delegate?.tabLocationViewDidTapLockImageView(self)
+    }
+  }
+
+  @objc func didTapReaderModeButton() {
+    delegate?.tabLocationViewDidTapReaderMode(self)
+  }
+  
+  @objc func didTapPlaylistButton() {
+    delegate?.tabLocationViewDidTapPlaylist(self)
+  }
+
+  @objc func didTapStopReloadButton() {
+    if loading {
+      delegate?.tabLocationViewDidTapStop(self)
+    } else {
+      delegate?.tabLocationViewDidTapReload(self)
+    }
+  }
+  
+  @objc func didTapVoiceSearchButton() {
+    delegate?.tabLocationViewDidTapVoiceSearch(self)
+  }
+
+  @objc func didTapLocationBar(_ recognizer: UITapGestureRecognizer) {
+    delegate?.tabLocationViewDidTapLocation(self)
+  }
+
+  @objc func didTapBraveShieldsButton() {
+    delegate?.tabLocationViewDidTapShieldsButton(self)
+  }
+
+  @objc func didTapBraveRewardsButton() {
+    delegate?.tabLocationViewDidTapRewardsButton(self)
+  }
+  
+  @objc func didTapWalletButton() {
+    delegate?.tabLocationViewDidTapWalletButton(self)
   }
 }
 
@@ -521,6 +545,16 @@ class DisplayTextField: UITextField {
   @available(*, unavailable)
   required init(coder: NSCoder) {
     fatalError()
+  }
+  
+  override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+    super.traitCollectionDidChange(previousTraitCollection)
+    leadingClippingFade.gradientLayer.colors = [
+      UIColor.braveBackground,
+      UIColor.braveBackground.withAlphaComponent(0.0)
+    ].map {
+      $0.resolvedColor(with: traitCollection).cgColor
+    }
   }
 
   override var accessibilityCustomActions: [UIAccessibilityCustomAction]? {

@@ -3,10 +3,11 @@
 import UIKit
 import CoreData
 import Foundation
-import BraveShared
+import BraveShields
 import Shared
 import BraveCore
 import os.log
+import Preferences
 
 public final class Domain: NSManagedObject, CRUD {
 
@@ -25,7 +26,6 @@ public final class Domain: NSManagedObject, CRUD {
   @NSManaged public var shield_fpProtection: NSNumber?
   @NSManaged public var shield_safeBrowsing: NSNumber?
 
-  @NSManaged public var historyItems: NSSet?
   @NSManaged public var bookmarks: NSSet?
 
   @NSManaged public var wallet_permittedAccounts: String?
@@ -38,6 +38,10 @@ public final class Domain: NSManagedObject, CRUD {
   
   private static let containsEthereumPermissionsPredicate = NSPredicate(format: "wallet_permittedAccounts != nil && wallet_permittedAccounts != ''")
   private static let containsSolanaPermissionsPredicate = NSPredicate(format: "wallet_solanaPermittedAcccounts != nil && wallet_solanaPermittedAcccounts != ''")
+  
+  @MainActor public var areAllShieldsOff: Bool {
+    return shield_allOff?.boolValue ?? false
+  }
 
   /// A domain can be created in many places,
   /// different save strategies are used depending on its relationship(eg. attached to a Bookmark) or browsing mode.
@@ -105,9 +109,7 @@ public final class Domain: NSManagedObject, CRUD {
       case .AllOff:
         return self.shield_allOff?.boolValue ?? false
       case .AdblockAndTp:
-        return self.shield_adblockAndTp?.boolValue ?? Preferences.Shields.blockAdsAndTracking.value
-      case .SafeBrowsing:
-        return self.shield_safeBrowsing?.boolValue ?? Preferences.Shields.blockPhishingAndMalware.value
+        return self.shield_adblockAndTp?.boolValue ?? ShieldPreferences.blockAdsAndTrackingLevel.isEnabled
       case .FpProtection:
         return self.shield_fpProtection?.boolValue ?? Preferences.Shields.fingerprintingProtection.value
       case .NoScript:
@@ -154,7 +156,7 @@ public final class Domain: NSManagedObject, CRUD {
   }
   
   public class func totalDomainsWithAdblockShieldsLoweredFromGlobal() -> Int {
-    guard Preferences.Shields.blockAdsAndTracking.value,
+    guard ShieldPreferences.blockAdsAndTrackingLevel.isEnabled,
           let domains = Domain.all(where: NSPredicate(format: "shield_adblockAndTp != nil")) else {
       return 0 // Can't be lower than off
     }
@@ -162,7 +164,7 @@ public final class Domain: NSManagedObject, CRUD {
   }
   
   public class func totalDomainsWithAdblockShieldsIncreasedFromGlobal() -> Int {
-    guard !Preferences.Shields.blockAdsAndTracking.value,
+    guard !ShieldPreferences.blockAdsAndTrackingLevel.isEnabled,
           let domains = Domain.all(where: NSPredicate(format: "shield_adblockAndTp != nil")) else {
       return 0 // Can't be higher than on
     }
@@ -213,6 +215,8 @@ public final class Domain: NSManagedObject, CRUD {
       return domain.wallet_solanaPermittedAcccounts?.split(separator: ",").map(String.init)
     case .fil:
       return nil
+    case .btc:
+      return nil
     @unknown default:
       return nil
     }
@@ -230,6 +234,8 @@ public final class Domain: NSManagedObject, CRUD {
       }
     case .fil:
       break
+    case .btc:
+      break
     @unknown default:
       break
     }
@@ -245,6 +251,8 @@ public final class Domain: NSManagedObject, CRUD {
       let predicate = Domain.containsSolanaPermissionsPredicate
       return all(where: predicate, context: context ?? DataController.viewContext) ?? []
     case .fil:
+      break
+    case .btc:
       break
     @unknown default:
       break
@@ -268,6 +276,8 @@ public final class Domain: NSManagedObject, CRUD {
           case .sol:
             $0.wallet_solanaPermittedAcccounts = nil
           case .fil:
+            break
+          case .btc:
             break
           @unknown default:
             break
@@ -398,25 +408,8 @@ extension Domain {
     switch shield {
     case .AllOff: shield_allOff = setting
     case .AdblockAndTp: shield_adblockAndTp = setting
-    case .SafeBrowsing: shield_safeBrowsing = setting
     case .FpProtection: shield_fpProtection = setting
     case .NoScript: shield_noScript = setting
-    }
-  }
-
-  /// Get whether or not a shield override is set for a given shield.
-  private func getBraveShield(_ shield: BraveShield) -> Bool? {
-    switch shield {
-    case .AllOff:
-      return self.shield_allOff?.boolValue
-    case .AdblockAndTp:
-      return self.shield_adblockAndTp?.boolValue
-    case .SafeBrowsing:
-      return self.shield_safeBrowsing?.boolValue
-    case .FpProtection:
-      return self.shield_fpProtection?.boolValue
-    case .NoScript:
-      return self.shield_noScript?.boolValue
     }
   }
 
@@ -495,6 +488,8 @@ extension Domain {
         }
       case .fil:
         break
+      case .btc:
+        break
       @unknown default:
         break
       }
@@ -513,6 +508,8 @@ extension Domain {
           wallet_solanaPermittedAcccounts = accounts.joined(separator: ",")
         }
       case .fil:
+        break
+      case .btc:
         break
       @unknown default:
         break

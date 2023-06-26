@@ -9,7 +9,7 @@ import BraveCore
 import DesignSystem
 import Strings
 import Data
-import BraveShared
+import Preferences
 
 public protocol WalletSiteConnectionDelegate {
   /// A list of accounts connected to this webpage (addresses)
@@ -67,7 +67,7 @@ public struct WalletPanelContainerView: View {
         presentWalletWithContext?(.panelUnlockOrSetup)
       } label: {
         HStack(spacing: 4) {
-          Image(braveSystemName: "brave.unlock")
+          Image(braveSystemName: "leo.lock.open")
           Text(Strings.Wallet.walletPanelUnlockWallet)
         }
       }
@@ -240,7 +240,7 @@ struct WalletPanelView: View {
       } else {
         return solConnectedAddresses.contains(selectedAccount.address) ? .connected : .disconnected
       }
-    case .fil:
+    case .fil, .btc:
       return .blocked
     @unknown default:
       return .blocked
@@ -298,6 +298,7 @@ struct WalletPanelView: View {
   private var networkPickerButton: some View {
     NetworkPicker(
       style: .init(textColor: .white, borderColor: .white),
+      isForOrigin: true,
       keyringStore: keyringStore,
       networkStore: networkStore
     )
@@ -305,7 +306,7 @@ struct WalletPanelView: View {
   
   private var pendingRequestsButton: some View {
     Button(action: { presentWalletWithContext(.pendingRequests) }) {
-      Image(braveSystemName: "brave.bell.badge")
+      Image(braveSystemName: "leo.notification.dot")
         .foregroundColor(.white)
         .frame(minWidth: 30, minHeight: 44)
         .contentShape(Rectangle())
@@ -327,17 +328,17 @@ struct WalletPanelView: View {
   private var menuButton: some View {
     Menu {
       Button(action: { keyringStore.lock() }) {
-        Label(Strings.Wallet.lock, braveSystemImage: "brave.lock")
+        Label(Strings.Wallet.lock, braveSystemImage: "leo.lock")
       }
       Button(action: { presentWalletWithContext(.settings) }) {
-        Label(Strings.Wallet.settings, braveSystemImage: "brave.gear")
+        Label(Strings.Wallet.settings, braveSystemImage: "leo.settings")
       }
       Divider()
       Button(action: { openWalletURL(WalletConstants.braveWalletSupportURL) }) {
-        Label(Strings.Wallet.helpCenter, braveSystemImage: "brave.info.circle")
+        Label(Strings.Wallet.helpCenter, braveSystemImage: "leo.info.outline")
       }
     } label: {
-      Image(systemName: "ellipsis")
+      Image(braveSystemName: "leo.more.horizontal")
         .frame(minWidth: 30, minHeight: 44)
         .contentShape(Rectangle())
     }
@@ -452,10 +453,10 @@ struct WalletPanelView: View {
           }
           VStack(spacing: 4) {
             let nativeAsset = accountActivityStore.userVisibleAssets.first(where: {
-              $0.token.symbol == networkStore.selectedChain.symbol
-              && $0.token.chainId == networkStore.selectedChainId
+              $0.token.symbol == networkStore.selectedChainForOrigin.symbol
+              && $0.token.chainId == networkStore.selectedChainIdForOrigin
             })
-            Text(String(format: "%.04f %@", nativeAsset?.decimalBalance ?? 0.0, networkStore.selectedChain.symbol))
+            Text(String(format: "%.04f %@", nativeAsset?.decimalBalance ?? 0.0, networkStore.selectedChainForOrigin.symbol))
               .font(.title2.weight(.bold))
             Text(currencyFormatter.string(from: NSNumber(value: (Double(nativeAsset?.price ?? "") ?? 0) * (nativeAsset?.decimalBalance ?? 0.0))) ?? "")
               .font(.callout)
@@ -465,7 +466,7 @@ struct WalletPanelView: View {
             Button {
               presentBuySendSwap()
             } label: {
-              Image(braveSystemName: "brave.arrow.left.arrow.right")
+              Image(braveSystemName: "leo.swap.horizontal")
                 .imageScale(.large)
                 .padding(.horizontal, 44)
                 .padding(.vertical, 8)
@@ -476,7 +477,7 @@ struct WalletPanelView: View {
             Button {
               presentWalletWithContext(.transactionHistory)
             } label: {
-              Image(braveSystemName: "brave.history")
+              Image(braveSystemName: "leo.history")
                 .imageScale(.large)
                 .padding(.horizontal, 44)
                 .padding(.vertical, 8)

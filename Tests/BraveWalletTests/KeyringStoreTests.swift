@@ -34,14 +34,14 @@ class KeyringStoreTests: XCTestCase {
     keyringService._addObserver = { _ in }
     keyringService._isLocked = { $0(false) }
     keyringService._selectedAccount = { $1(currentSelectedAccount.address) }
-    keyringService._setSelectedAccount = { $2(true) }
+    keyringService._setSelectedAccount = { $3(true) }
     
     let rpcService = BraveWallet.TestJsonRpcService()
     rpcService._addObserver = { _ in }
-    rpcService._chainId = { $1(currentChainId) }
-    rpcService._network = { $1(currentNetwork) }
+    rpcService._chainIdForOrigin = { $2(currentChainId) }
+    rpcService._network = { $2(currentNetwork) }
     
-    rpcService._setNetwork = { _, _, completion in
+    rpcService._setNetwork = { _, _, _, completion in
       completion(true)
     }
     
@@ -106,5 +106,36 @@ class KeyringStoreTests: XCTestCase {
     waitForExpectations(timeout: 1) { error in
       XCTAssertNil(error)
     }
+  }
+  
+  @MainActor func testIsStrongPassword() async {
+    let (keyringService, rpcService, walletService) = setupServices()
+    let store = KeyringStore(
+      keyringService: keyringService,
+      walletService: walletService,
+      rpcService: rpcService
+    )
+    
+    let invalidPassword1 = ""
+    var isStrongPassword = await store.isStrongPassword(invalidPassword1)
+    XCTAssertFalse(isStrongPassword)
+    
+    let invalidPassword2 = "1234"
+    isStrongPassword = await store.isStrongPassword(invalidPassword2)
+    XCTAssertFalse(isStrongPassword)
+    
+    let validPassword = "12345678"
+    isStrongPassword = await store.isStrongPassword(validPassword)
+    XCTAssertTrue(isStrongPassword)
+    
+    let uuid = UUID().uuidString
+    // first 30 characters of uuid
+    let validPassword2 = String(uuid[uuid.startIndex..<uuid.index(uuid.startIndex, offsetBy: 30)])
+    isStrongPassword = await store.isStrongPassword(validPassword2)
+    XCTAssertTrue(isStrongPassword)
+    
+    let strongPassword = "LDKH66BJbLsHQPEAK@4_zak*"
+    isStrongPassword = await store.isStrongPassword(strongPassword)
+    XCTAssertTrue(isStrongPassword)
   }
 }

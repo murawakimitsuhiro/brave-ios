@@ -4,8 +4,8 @@
 
 import Foundation
 import Shared
-import BraveShared
 import UIKit
+import Preferences
 
 enum TabBarVisibility: Int, CaseIterable {
   case never
@@ -14,18 +14,9 @@ enum TabBarVisibility: Int, CaseIterable {
 }
 
 extension Preferences {
-  public enum AutoCloseTabsOption: Int, CaseIterable, RepresentableOptionType {
+  public enum AutoCloseTabsOption: Int, CaseIterable {
     case manually
     case oneDay, oneWeek, oneMonth
-
-    public var displayString: String {
-      switch self {
-      case .manually: return Strings.Settings.autocloseTabsManualOption
-      case .oneDay: return Strings.Settings.autocloseTabsOneDayOption
-      case .oneWeek: return Strings.Settings.autocloseTabsOneWeekOption
-      case .oneMonth: return Strings.Settings.autocloseTabsOneMonthOption
-      }
-    }
 
     /// Return time interval when to remove old tabs, or nil if no tabs should be removed.
     public var timeInterval: TimeInterval? {
@@ -67,6 +58,8 @@ extension Preferences {
     static let alwaysRequestDesktopSite = Option<Bool>(key: "general.always-request-desktop-site", default: UIDevice.isIpad)
     /// Controls whether or not media should continue playing in the background
     static let mediaAutoBackgrounding = Option<Bool>(key: "general.media-auto-backgrounding", default: false)
+    /// Controls whether or not youtube videos should play with the highest quality by default
+    static let youtubeHighQuality = Option<String>(key: "general.youtube-high-quality", default: "off")
     /// Controls whether or not to show the last visited bookmarks folder
     static let showLastVisitedBookmarksFolder = Option<Bool>(key: "general.bookmarks-show-last-visited-bookmarks-folder", default: true)
 
@@ -234,7 +227,7 @@ extension Preferences {
       Option<Date?>(key: "playlist.lastPlaylistFoldersSyncTime", default: nil)
     /// Sync shared folders automatically preference
     static let syncSharedFoldersAutomatically =
-      Option<Bool>(key: "playlist.syncSharedFoldersAutomatically", default: false)
+      Option<Bool>(key: "playlist.syncSharedFoldersAutomatically", default: true)
   }
     
   final public class PrivacyReports {

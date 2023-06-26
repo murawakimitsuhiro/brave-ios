@@ -7,6 +7,7 @@ import CoreData
 import Shared
 import Data
 import BraveShared
+import Preferences
 import Favicon
 import CoreServices
 import os.log
@@ -21,21 +22,21 @@ class BookmarksViewController: SiteTableViewController, ToolbarUrlActionsProtoco
   weak var toolbarUrlActionsDelegate: ToolbarUrlActionsDelegate?
 
   private lazy var editBookmarksButton: UIBarButtonItem? = UIBarButtonItem().then {
-    $0.image = UIImage(named: "edit", in: .module, compatibleWith: nil)!.template
+    $0.image = UIImage(braveSystemNamed: "leo.edit.pencil")
     $0.style = .plain
     $0.target = self
     $0.action = #selector(onEditBookmarksButton)
   }
 
   private lazy var addFolderButton: UIBarButtonItem? = UIBarButtonItem().then {
-    $0.image = UIImage(named: "bookmarks_newfolder_icon", in: .module, compatibleWith: nil)!.template
+    $0.image = UIImage(braveSystemNamed: "leo.folder.new")
     $0.style = .plain
     $0.target = self
     $0.action = #selector(onAddBookmarksFolderButton)
   }
 
   private lazy var importExportButton: UIBarButtonItem? = UIBarButtonItem().then {
-    $0.image = UIImage(named: "nav-share", in: .module, compatibleWith: nil)!.template
+    $0.image = UIImage(braveSystemNamed: "leo.share.macos")
     $0.style = .plain
     $0.target = self
     $0.action = #selector(importExportAction(_:))
@@ -398,6 +399,7 @@ class BookmarksViewController: SiteTableViewController, ToolbarUrlActionsProtoco
       cell.imageView?.layer.cornerRadius = 6
       cell.imageView?.layer.cornerCurve = .continuous
       cell.imageView?.layer.masksToBounds = true
+      cell.imageView?.tintColor = .braveLabel
 
       if let image = image {
         // folder or preset icon
@@ -406,8 +408,8 @@ class BookmarksViewController: SiteTableViewController, ToolbarUrlActionsProtoco
         cell.imageView?.layer.borderWidth = 0.0
         cell.imageView?.clearMonogramFavicon()
       } else {
-        cell.imageView?.layer.borderColor = BraveUX.faviconBorderColor.cgColor
-        cell.imageView?.layer.borderWidth = BraveUX.faviconBorderWidth
+        cell.imageView?.layer.borderColor = FaviconUX.faviconBorderColor.cgColor
+        cell.imageView?.layer.borderWidth = FaviconUX.faviconBorderWidth
 
         // Sets the favIcon of a cell's imageView from Brave-Core
         // If the icon does not exist, fallback to our FavIconFetcher
@@ -415,7 +417,7 @@ class BookmarksViewController: SiteTableViewController, ToolbarUrlActionsProtoco
           cell.imageView?.clearMonogramFavicon()
 
           if let urlString = item.url, let url = URL(string: urlString) {
-            cell.imageView?.loadFavicon(for: url, monogramFallbackCharacter: item.title?.first) { [weak cell] favicon in
+            cell.imageView?.loadFavicon(for: url) { [weak cell] favicon in
               if favicon?.isMonogramImage == true, let icon = item.bookmarkNode.icon {
                 cell?.imageView?.image = icon
               }
@@ -447,7 +449,7 @@ class BookmarksViewController: SiteTableViewController, ToolbarUrlActionsProtoco
       cell.textLabel?.font = UIFont.systemFont(ofSize: fontSize)
       cell.accessoryType = .none
     } else {
-      configCell(image: UIImage(named: "bookmarks_folder_hollow", in: .module, compatibleWith: nil)!.withTintColor(.braveLabel))
+      configCell(image: UIImage(braveSystemNamed: "leo.folder"))
       cell.textLabel?.font = UIFont.boldSystemFont(ofSize: fontSize)
       cell.accessoryType = .disclosureIndicator
       cell.setRightBadge(nil)

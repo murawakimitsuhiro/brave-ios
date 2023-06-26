@@ -119,9 +119,14 @@ class MediaPlayer: NSObject {
     // Stop receiving remote commands
     UIApplication.shared.endReceivingRemoteControlEvents()
   }
+  
+  func clear() {
+    player.replaceCurrentItem(with: nil)
+    pendingMediaItem = nil
+  }
 
-  func load(url: URL) -> Deferred<AnyPublisher<Bool, MediaPlaybackError>> {
-    load(asset: AVURLAsset(url: url, options: AVAsset.defaultOptions))
+  func load(url: URL) async throws -> Bool {
+    try await load(asset: AVURLAsset(url: url, options: AVAsset.defaultOptions))
   }
 
   /// On success, returns a publisher with a Boolean.
@@ -129,56 +134,24 @@ class MediaPlayer: NSObject {
   /// If an existing item is loaded, you should seek to offset zero to restart playback.
   /// If a new item is loaded, you should call play to begin playback.
   /// Returns an error on failure.
-  func load(asset: AVURLAsset) -> Deferred<AnyPublisher<Bool, MediaPlaybackError>> {
-    return Deferred { [weak self] in
-      guard let self = self else {
-        return Fail<Bool, MediaPlaybackError>(error: .cancelled)
-          .eraseToAnyPublisher()
+  func load(asset: AVURLAsset) async throws -> Bool {
+    // If the same asset is being loaded again.
+    // Just play it.
+    if let currentItem = player.currentItem, currentItem.asset.isKind(of: AVURLAsset.self) && player.status == .readyToPlay {
+      if let currentAsset = currentItem.asset as? AVURLAsset, currentAsset.url.absoluteString == asset.url.absoluteString {
+        pendingMediaItem = nil
+        return false
       }
-
-      return Future { resolver in
-        // If the same asset is being loaded again.
-        // Just play it.
-        if let currentItem = self.player.currentItem, currentItem.asset.isKind(of: AVURLAsset.self) && self.player.status == .readyToPlay {
-          if let currentAsset = currentItem.asset as? AVURLAsset, currentAsset.url.absoluteString == asset.url.absoluteString {
-            resolver(.success(false))  // Same item is playing.
-            self.pendingMediaItem = nil
-            return
-          }
-        }
-
-        let assetKeys = ["playable", "tracks", "duration"]
-        self.pendingMediaItem = AVPlayerItem(asset: asset)
-
-        DispatchQueue.global(qos: .userInitiated).async {
-          asset.loadValuesAsynchronously(forKeys: assetKeys) { [weak self] in
-            guard let self = self, let item = self.pendingMediaItem else { return }
-
-            for key in assetKeys {
-              var error: NSError?
-              let status = item.asset.statusOfValue(forKey: key, error: &error)
-              if let error = error {
-                resolver(.failure(.other(error)))
-                return
-              } else if status == .cancelled {
-                Logger.module.error("Asset Duration Fetch Cancelled")
-                resolver(.success(false))
-                return
-              } else if status != .loaded {
-                resolver(.failure(.cannotLoadAsset(status: status)))
-                return
-              }
-            }
-
-            DispatchQueue.main.async {
-              self.player.replaceCurrentItem(with: item)
-              self.pendingMediaItem = nil
-              resolver(.success(true))  // New Item loaded
-            }
-          }
-        }
-      }.eraseToAnyPublisher()
     }
+
+    let item = AVPlayerItem(asset: asset)
+    pendingMediaItem = item
+    
+    _ = try await asset.load(.isPlayable, .tracks, .duration)
+
+    player.replaceCurrentItem(with: item)
+    pendingMediaItem = nil
+    return true  // New Item loaded
   }
 
   func play() {
@@ -343,9 +316,14 @@ class MediaPlayer: NSObject {
     playerLayer.player = player
     return playerLayer
   }
-
-  func detachLayer() {
-    playerLayer.player = nil
+  
+  func addTimeObserver(interval: Int, onTick: @escaping (CMTime) -> Void) -> Any {
+    let interval = CMTimeMake(value: Int64(interval), timescale: 1000)
+    return player.addPeriodicTimeObserver(
+      forInterval: interval, queue: .main,
+      using: { time in
+        onTick(time)
+      })
   }
 
   // MARK: - Private Variables
@@ -450,11 +428,8 @@ extension MediaPlayer {
 extension MediaPlayer {
   /// Registers basic notifications
   private func registerNotifications() {
-    Publishers.Zip(
-      NotificationCenter.default.publisher(for: UIScene.didEnterBackgroundNotification),
-      NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
-    )
-    .sink { [weak self] _ in
+    NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
+      .sink { [weak self] _ in
       guard let self = self else { return }
 
       if let pictureInPictureController = self.pictureInPictureController,
@@ -462,14 +437,11 @@ extension MediaPlayer {
         return
       }
 
-      self.detachLayer()
+      self.playerLayer.player = nil
     }.store(in: &notificationObservers)
 
-    Publishers.Zip(
-      NotificationCenter.default.publisher(for: UIScene.didActivateNotification),
-      NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)
-    )
-    .sink { [weak self] _ in
+    NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+      .sink { [weak self] _ in
       guard let self = self else { return }
 
       if let pictureInPictureController = self.pictureInPictureController,
@@ -477,9 +449,9 @@ extension MediaPlayer {
         return
       }
 
-      self.attachLayer()
+      self.playerLayer.player = self.player
     }.store(in: &notificationObservers)
-
+    
     NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance())
       .sink { [weak self] notification in
 
@@ -527,17 +499,14 @@ extension MediaPlayer {
             event: .finishedPlaying))
       }.store(in: &notificationObservers)
 
-    let interval = CMTimeMake(value: 25, timescale: 1000)
-    periodicTimeObserver = player.addPeriodicTimeObserver(
-      forInterval: interval, queue: .main,
-      using: { [weak self] time in
-        guard let self = self else { return }
+    periodicTimeObserver = addTimeObserver(interval: 25, onTick: { [weak self] _ in
+      guard let self = self else { return }
 
-        self.periodicTimeSubscriber.send(
-          EventNotification(
-            mediaPlayer: self,
-            event: .periodicPlayTimeChanged))
-      })
+      self.periodicTimeSubscriber.send(
+        EventNotification(
+          mediaPlayer: self,
+          event: .periodicPlayTimeChanged))
+    })
   }
 
   /// Registers playback controls notifications

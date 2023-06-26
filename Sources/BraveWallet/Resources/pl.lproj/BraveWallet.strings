@@ -10,6 +10,9 @@
 /* The title displayed on the account details screen */
 "wallet.accountDetailsTitle" = "Szczegóły konta";
 
+/* The error shown below the account name field when adding or renaming a wallet account if the length is longer than 30 characters. */
+"wallet.accountNameLengthError" = "Nazwa konta może mieć maksymalnie 30 znaków";
+
 /* A button title for displaying their accounts private key */
 "wallet.accountPrivateKey" = "Klucz prywatny";
 
@@ -27,6 +30,15 @@
 
 /* The title of the button at the bottom of Swap Screen, when the sell token is erc20 and it has not been activated its allowance. %@ will be replaced with the sell token's symbol such as 'DAI' or 'USDC' */
 "wallet.activateToken" = "Aktywuj token %@";
+
+/* The description when showing no transactions inside Activity tab. */
+"wallet.activityPageEmptyDescription" = "Po wykonaniu transakcji będzie ona widoczna tutaj.";
+
+/* The title when showing no transactions inside Activity tab. */
+"wallet.activityPageEmptyTitle" = "Brak transakcji do wyświetlenia";
+
+/* The title of the tab that will display user's transaction activity for all accounts. */
+"wallet.activityPageTitle" = "Aktywność";
 
 /* The title of the button which when tapped will add a new account to the users list of crypto accounts. It will be used as the title of the navigation bar item button on the top right of the add custom token scree. */
 "wallet.addAccountAddButton" = "Dodaj";
@@ -202,6 +214,21 @@
 /* A disclaimer that appears at the bottom of an asset detail screen which shows prices and price history. CoinGecko is a third-party product. */
 "wallet.coinGeckoDisclaimer" = "Dane o cenach dostarczane przez CoinGecko";
 
+/* The title of the 24h volume of this coin from market. */
+"wallet.coinMarket24HVolume" = "Obrót 24-godz.";
+
+/* The message will be displayed when there is no coin market loaded or having an error. */
+"wallet.coinMarketEmptyMsg" = "Brak dostępnych informacji rynkowych";
+
+/* The header title of the section that display coin market information. */
+"wallet.coinMarketInformation" = "Informacja";
+
+/* The title of the market cap of this coin from market. */
+"wallet.coinMarketMarketCap" = "Kapitalizacja rynku";
+
+/* The title of the rank of this coin from market. */
+"wallet.coinMarketRank" = "Ranga";
+
 /* One of the coin types for users to create an account in Ethereum mainnet or any EVM networks. */
 "wallet.coinTypeEthereum" = "Ethereum";
 
@@ -301,6 +328,12 @@
 /* The title of the crypto tab */
 "wallet.cryptoTitle" = "Brave Wallet";
 
+/* The navigation title of the screen for users to customize ipfs public gateway address for NFT. */
+"wallet.customizeIPFSNFTPublicGatewayNavTitle" = "Dostosuj bramkę protokołu IPFS dla NFT";
+
+/* The navigation title of the screen for users to customize ipfs public gateway address. */
+"wallet.customizeIPFSPublicGatewayNavTitle" = "Dostosuj bramkę protokołu IPFS";
+
 /* The title above the input fields for users to input network block explorer urls in Custom Network Details Screen. */
 "wallet.customNetworkBlockExplorerUrlsTitle" = "Adresy przeglądarek bloków.";
 
@@ -368,7 +401,7 @@
 "wallet.customTokenNetworkHeader" = "Wybierz sieć";
 
 /* The title displayed on the add custom token screen */
-"wallet.customTokenTitle" = "Niestandardowe";
+"wallet.customTokenTitle" = "Dodaj zasób niestandardowy";
 
 /* The title of the notification which will prompt at the top of the browser when users are visiting web3 site that is not yet connected with Brave Wallet. The '%@' will be the site attempting to connect. For example: \"app.uniswap.org wants to interact with Brave Wallet\" */
 "wallet.dappsConnectionNotificationOriginTitle" = "%@ chce wejść w interakcję z portfelem Brave Wallet";
@@ -550,6 +583,42 @@
 /* The button title for showing the screen to change what assets are visible */
 "wallet.editVisibleAssetsButtonTitle" = "Edytuj widoczne zasoby";
 
+/* Title on the button that users can click to enable Brave to resolve the ENS domain they entered. */
+"wallet.ensDomainInterstitialPageButtonProceed" = "Kontynuuj, korzystając z serwera Infura";
+
+/* Description displayed when users chose Brave to ask them if they want the ENS to be resolved every time they enter one. The first '%@' will be replaced with a link to Infura's terms of use page. The second '%@' will be replaced with the value of 'Web3DomainInterstitialPageTAndU'. The third '%@' will be replaced with a link to Infura's privacy policy page. The last '%@' will be replaced with the value of 'Web3DomainInterstitialPagePrivacyPolicy'. */
+"wallet.ensDomainInterstitialPageDescription" = "Brave będzie używać Infura do obsługi nazw domen .eth należących do ENS (Ethereum Name Service). Brave ukrywa Twój adres IP. Jeśli to włączysz, Infura zobaczy, że ktoś próbuje odwiedzić te domeny .eth, ale nic poza tym. Zobacz <a href=%1$@>%2$@</a> i <a href=%3$@>%4$@</a> w Infura.";
+
+/* Title displayed when users chose Brave to ask them if they want the ENS domain to be resolved every time they enter one. */
+"wallet.ensDomainInterstitialPageTitle" = "Włączyć obsługę Ethereum Name Service (ENS) w Brave?";
+
+/* Title on the button that users can click to enable Brave to resolve the ENS offchain lookup for the domain they entered. */
+"wallet.ensOffchainDomainInterstitialPageButtonProceed" = "Kontynuuj z wyszukiwaniem poza łańcuchem";
+
+/* Description displayed when users chose Brave to ask them if they want the ENS to be resolved every time they enter one. The first '%@' will be replaced with a link to Brave Wallet's offchain lookup privacy considerations. The second '%@' will be replaced with the value of 'ensOffchainDomainInterstitialLearnMore'. */
+"wallet.ensOffchainDomainInterstitialPageDescription" = "Ta nazwa domeny .eth jest przechowywana poza łańcuchem i będzie obsługiwana przez bramkę strony trzeciej. Jeśli włączysz opcję wyszukiwania poza łańcuchem ENS, bramka strony trzeciej będzie widziała, że próbujesz przejść na domenę .eth. <a href=%1$@>%2$@</a>.";
+
+/* Title displayed when users chose Brave to ask them if they want the ENS Offchain domain to be resolved every time they enter one. */
+"wallet.ensOffchainDomainInterstitialPageTitle" = "Włączyć obsługę wyszukiwania poza łańcuchem Ethereum Name Service (ENS) w Brave?";
+
+/* Button title when requesting to do an ENS off chain lookup. */
+"wallet.ensOffchainGatewayButton" = "Wykorzystaj domenę ENS";
+
+/* Description shown send address / ENS domain when requesting to do an ENS off chain lookup. */
+"wallet.ensOffchainGatewayDesc" = "Wygląda na to, że wprowadzono adres ENS. Będziemy musieli skorzystać z zewnętrznego rozwiązania, aby zrealizować tę prośbę. Pomaga to zapewnić, że domena .eth jest odporna na wycieki i że transakcja jest bezpieczna.";
+
+/* Title shown send address / ENS domain when requesting to do an ENS off chain lookup. */
+"wallet.ensOffchainGatewayTitle" = "Brave obsługuje bramki spoza łańcucha do rozwiązywania domen .eth.";
+
+/* The description for the options to allow Ethereum Name service domain names offchain. '%@' will be replaced with a url to explain more about ENS offchain lookup. */
+"wallet.ensOffchainResolveMethodDescription" = "[Dowiedz się więcej](%@) o kwestiach prywatności w ramach wyszukiwania ENS poza łańcuchem.";
+
+/* The title for the options to allow Ethereum Name service domain names offchain. */
+"wallet.ensOffchainResolveMethodTitle" = "Zezwól na wyszukiwanie ENS poza łańcuchem";
+
+/* The title for the options to resolve Ethereum Name service domain names. */
+"wallet.ensResolveMethodTitle" = "Rozpoznaj nazwy domen Ethereum Name Service (ENS)";
+
 /* A placeholder for the text field that users will input the custom token address */
 "wallet.enterAddress" = "Wprowadź adres";
 
@@ -685,8 +754,20 @@
 /* An error message displayed when the user doesn't have enough liquidity to proceed with a transaction. */
 "wallet.insufficientLiquidity" = "Niewystarczająca płynność";
 
-/* The footer of the section for IPFS NFT gateway setting. */
-"wallet.ipfsSettingsFooter" = "Bramka jest wykorzystywana do obsługi zawartości NFT w portfelu";
+/* A title will displayed in the IPFS error page when IPFS is disabled. */
+"wallet.ipfsErrorTitle" = "Ta witryna jest nieosiągalna";
+
+/* The navigation title of the screen for users to customize NFT gateway. */
+"wallet.ipfsPublicGatewayAddressNFTTitle" = "Adres publicznej bramki protokołu IPFS w przypadku NFT";
+
+/* The navigation title of the screen for users to customize IPFS public gateway. */
+"wallet.ipfsPublicGatewayAddressTitle" = "Adres publicznej bramki protokołu IPFS";
+
+/* The description for the options to allow to resolve IPFS scheme urls. '%@' will be replaced with a url to explain more about IPFS gateway privacy. */
+"wallet.ipfsResolveMethodDescription" = "[Dowiedz się więcej](%@) o kwestiach prywatności w przypadku bramki protokołu IPFS.";
+
+/* The title of the section under Web3 settings for users to pick an option to resolve IPFS Resources. */
+"wallet.ipfsResourcesOptionsTitle" = "Obsługa zasobów IPFS";
 
 /* The header of the section under Web3 settings for IPFS NFT gateway setting. */
 "wallet.ipfsSettingsHeader" = "IPFS";
@@ -726,6 +807,9 @@
 
 /* The title of the button on the screen to manage web3 sites account connections that will show an alert to remove all connected website permissions. */
 "wallet.manageSiteConnectionsRemoveAll" = "Usuń wszystko";
+
+/* The page title that will display the top 250 tokens from the market via CoinGecko */
+"wallet.marketPageTitle" = "Rynek";
 
 /* The highest the user will pay in a gas fee based on the entered gas fee details or predefined option. It is displayed above the amount */
 "wallet.maximumGasFee" = "Maksymalna opłata";
@@ -808,11 +892,35 @@
 /* The title an entry that will be displayed in NFT detail. This entry to display this NFT's token standard */
 "wallet.nftDetailTokenStandard" = "Standard tokena";
 
+/* The title of the alert that asks users either to enable NFT discovery or import manually. `SimpleHash` is the third-party service name, so it does not need to be translated. */
+"wallet.nftDiscoveryCalloutDescription" = "Portfel Brave Wallet może korzystać z usługi strony trzeciej, aby automatycznie wyświetlać Twoje NFT. Brave udostępni Twoje adresy portfela  SimpleHash, aby zapewnić tę usługę. Dowiedz się więcej.";
+
+/* This is the same `Learn more` at the end of `nftDiscoveryCalloutDescription`, but we need a separat translation to detect the range of it in order to build some attributed strings. */
+"wallet.nftDiscoveryCalloutDescriptionLearnMore" = "Dowiedz się więcej";
+
+/* The title of the button that user clicks to disable NFT discovery. */
+"wallet.nftDiscoveryCalloutDisable" = "Nie, zrobię to ręcznie";
+
+/* The title of the button that user clicks to enable NFT discovery. */
+"wallet.nftDiscoveryCalloutEnable" = "Tak, kontynuuj";
+
+/* The title of the alert that asks users either to enable NFT discovery or import manually. */
+"wallet.nftDiscoveryCalloutTitle" = "Chcesz, żeby Twoje NFT były wyświetlane automatycznie?";
+
+/* The title of the button that user clicks to add his/her first NFT */
+"wallet.nftEmptyImportNFT" = "Importowanie NFT";
+
 /* Description of the NFT Gateway setting */
 "wallet.nftGatewayLongDescription" = "Należy podać aktualną bramkę IPFS. Podana bramka zostanie sprawdzona po względem możliwości wczytywania zasobów IPFS.";
 
-/* The navigation title of the screen for users to customize NFT gateway. */
-"wallet.nftGatewayTitle" = "Dostosuj bramkę NFT";
+/* The description of the empty state inside NFT tab. */
+"wallet.nftPageEmptyDescription" = "Chcesz jakieś dodać? Wystarczy, że klikniesz poniższy przycisk, żeby rozpocząć importowanie.";
+
+/* The title of the empty state inside NFT tab. */
+"wallet.nftPageEmptyTitle" = "Nie ma tu jeszcze żadnych NFT.";
+
+/* The title of the tab that will display user's visible NFT assets. */
+"wallet.nftPageTitle" = "NFT";
 
 /* The title which is displayed above a list of NFTs. 'NFT' is an acronym for Non-Fungible Token. */
 "wallet.nftsTitle" = "NFT";
@@ -836,7 +944,7 @@
 "wallet.otherWalletActionsAccessibilityTitle" = "Inne działania portfela";
 
 /* The error message displayed when a user enters a password that does not meet the requirements */
-"wallet.passwordDoesNotMeetRequirementsError" = "Hasło musi składać się co najmniej z 7 znaków i zawierać co najmniej jedną literę, jedną cyfrę i jeden znak specjalny.";
+"wallet.passwordDoesNotMeetRequirementsError" = "Hasło musi składać się z co najmniej 8 znaków";
 
 /* A placeholder string that will be used on password text fields */
 "wallet.passwordPlaceholder" = "Hasło";
@@ -1000,8 +1108,8 @@
 /* The description of a send button on the buy/send/swap modal */
 "wallet.sendDescription" = "Wyślij kryptowalutę lub przelej z jednego konta na inne.";
 
-/* An error that appears below the send crypto address text field, when the input `To` domain/url that we cannot resolve to a wallet address. Ex. `Stephen.sol` */
-"wallet.sendErrorDomainNotRegistered" = "%@ nie jest zarejestrowane";
+/* An error that appears below the send crypto address text field, when the input `To` domain/url that we cannot resolve to a wallet address. The '%@' will be replaced with the coin type Ex. `Domain doesn\'t have a linked ETH address` */
+"wallet.sendErrorDomainNotRegistered" = "Domena nie ma połączonego adresu %@";
 
 /* A placeholder of the address text field. */
 "wallet.sendToCryptoAddressPlaceholder" = "Wprowadź adres";
@@ -1046,7 +1154,7 @@
 "wallet.settingsNetworkButtonTitle" = "Sieci";
 
 /* The title of a button that will reset the wallet. As in to erase the users wallet from the device */
-"wallet.settingsResetButtonTitle" = "Resetuj portfel Brave Wallet";
+"wallet.settingsResetButtonTitle" = "Resetuj i wyczyść dane portfela";
 
 /* The title of a button that will reset transaction and nonce information. As in to erase the users transaction history and reset nonce value starting from 0x0 */
 "wallet.settingsResetTransactionAlertButtonTitle" = "Resetuj";
@@ -1135,6 +1243,15 @@
 /* The button title to skip recovery phrase backup */
 "wallet.skipButtonTitle" = "Pomiń";
 
+/* Title on the button that users can click to enable Brave to resolve the SNS domain they entered. */
+"wallet.snsDomainInterstitialPageButtonProceed" = "Kontynuuj, korzystając z serwera Syndica";
+
+/* Description displayed when users chose Brave to ask them if they want the SNS to be resolved every time they enter one. The first '%@' will be replaced with a link to Syndica's terms of use page. The second '%@' will be replaced with the value of 'snsDomainInterstitialPageTAndU'. The third '%@' will be replaced with a link to Syndica's privacy policy page. The last '%@' will be replaced with the value of 'snsDomainInterstitialPagePrivacyPolicy'. */
+"wallet.snsDomainInterstitialPageDescription" = "Brave będzie używać Syndica do rozwiązywania nazw domen .sol. Brave ukrywa Twój adres IP. Jeśli to włączysz, Syndica zobaczy, że ktoś próbuje odwiedzić te domeny .sol, ale nic poza tym. Zobacz, że Syndica ma <a href=%1$@>1%2$@1</a> i <a href=%3$@>2%4$@2</a>.";
+
+/* Title displayed when users chose Brave to ask them if they want the SNS to be resolved every time they enter one. */
+"wallet.snsDomainInterstitialPageTitle" = "Włączyć obsługę domeny Solana Name Service (SNS) w przeglądarce Brave?";
+
 /* The title displayed above the System Program AdvanceNonceAccount instruction type for Solana Instruction details. */
 "wallet.solanaAdvanceNonceAccountInstructionName" = "Zaawansowane konto nonce";
 
@@ -1210,6 +1327,12 @@
 /* The label displayed beside the Accounts for an instruction type we don't support decoding. Ex. \"Accounts: <solana_public_key>\" */
 "wallet.solanaInstructionAccounts" = "Konta";
 
+/* The label displayed beside the address for the Address Lookup Table Account. Ex. \"Address Lookup Table Account: B1A2...\" */
+"wallet.solanaInstructionAddressLookupAcc" = "Konto w tabeli adresów";
+
+/* The label displayed beside the address for the Address Lookup Table Account. Ex. \"Address Lookup Table Index: 1\" */
+"wallet.solanaInstructionAddressLookupIndex" = "Indeks w tabeli adresów";
+
 /* The label displayed beside the Data for an instruction type we don't support decoding. Ex. \"Data: [1, 20, 3, 5, 50]]\" */
 "wallet.solanaInstructionData" = "Dane";
 
@@ -1233,6 +1356,9 @@
 
 /* The warning message to let users understand the risk of using Brave Wallet to sign any transaction. */
 "wallet.solanaSignTransactionWarning" = "Uwaga: Należy pamiętać, że Brave nie może zweryfikować, co się stanie, gdy złożysz podpis. Podpis może autoryzować niemal dowolną operację na Twoim koncie lub w Twoim imieniu taką jak przekazanie całkowitej kontroli nad Twoim kontem i kryptoaktywami stronie, z której pochodzi żądanie. Składaj podpisy tylko wtedy, gdy masz pewność i ufasz stronie przesyłającej żądanie.";
+
+/* The title displayed above the value of a Solana swap transaction in transaction confirmation view, transaction details view and transaction summary rows. */
+"wallet.solanaSwapTransactionTitle" = "Zamień transakcje";
 
 /* The title displayed above the Token Program Sync Native instruction type for Solana Instruction details. */
 "wallet.solanaSyncNativeInstructionName" = "Synchronizacja natywna";
@@ -1318,11 +1444,11 @@
 /* The description of a swap button on the buy/send/swap modal */
 "wallet.swapDescription" = "Wymień tokeny";
 
-/* A longer disclaimer about the DEX aggrigator used by Brave for swap transactions. '0x' is a company name. 'DEX aggregator' is a type of blockchain-based service (decentralized exchange). 'ONLY' is emphasized to show importance of 0x's data usage. */
-"wallet.swapDexAggrigatorDisclaimer" = "0x przetworzy adres Ethereum i adres IP w celu przeprowadzenia transakcji (w tym uzyskania ofert). 0x wykorzysta te dane JEDYNIE w celu przetworzenia transakcji.";
+/* A longer disclaimer about the DEX aggrigator used by Brave for swap transactions. The first '%@' is a company name. 'DEX aggregator' is a type of blockchain-based service (decentralized exchange). 'ONLY' is emphasized to show importance of the company's data usage. */
+"wallet.swapDexAggrigatorDisclaimer" = "%1$@ przetworzy adres %2$@ i adres IP w celu przeprowadzenia transakcji (w tym uzyskania ofert). %3$@ wykorzysta te dane JEDYNIE w celu przetworzenia transakcji.";
 
-/* A disclaimer note shown on the Swap screen. '0x' is a company name. 'DEX aggregator' is a type of blockchain-based service (decentralized exchange) */
-"wallet.swapDexAggrigatorNote" = "Brave korzysta z 0x jako agregatora DEX.";
+/* A disclaimer note shown on the Swap screen. '%@' will be replaced by a company name, ex. '0x' / 'Jupiter'. 'DEX aggregator' is a type of blockchain-based service (decentralized exchange) */
+"wallet.swapDexAggrigatorNote" = "Brave korzysta z %@ jako agregatora DEX.";
 
 /* The 'Limit' order type. Limit orders only execute when the price requirements are met */
 "wallet.swapLimitOrderType" = "Limit";
@@ -1468,6 +1594,18 @@
 /* The short name of one of the on ramp provider. */
 "wallet.transakProviderShortName" = "Transak";
 
+/* Description displayed when users chose Brave to ask them if they want the Unstoppable Domains to be resolved every time they enter one. The first '%@' will be replaced with a list of supported TLDs like '.x' or '.bitcoin'. The second '%@' be replaced with a link to Infura's terms of use page. The third '%@' will be replaced with the value of 'Web3DomainInterstitialPageTAndU'. The fourth '%@' will be replaced with a link to Infura's privacy policy page. The last '%@' will be replaced with the value of 'Web3DomainInterstitialPagePrivacyPolicy'. */
+"wallet.udDomainInterstitialPageDescription" = "Brave będzie używać Infura do obsługi nazw domen .crypto (oraz %1$@) należących do Unstoppable Domains. Brave ukrywa Twój adres IP. Jeśli to włączysz, Infura zobaczy, że ktoś próbuje odwiedzić te domeny, ale nic poza tym. Zobacz <a href=%2$@>%3$@</a> i <a href=%4$@>%5$@</a> w Infura.";
+
+/* Title displayed when users chose Brave to ask them if they want the Unstoppable Domains domain to be resolved every time they enter one. */
+"wallet.udDomainInterstitialPageTitle" = "Włączyć obsługę Unstoppable Domains w Brave?";
+
+/* The description for the options to allow Unstoppable Domain domain names. '%@' will be replaced with a url to explain more about Unstoppable Domains. */
+"wallet.udResolveMethodDescription" = "[Dowiedz się więcej](%@) o kwestiach prywatności w przypadku Unstoppable Domains.";
+
+/* The title for the options to resolve Unstoppable Domains domain names. */
+"wallet.udResolveMethodTitle" = "Obsługa nazw domeny Unstoppable Domains";
+
 /* An error message displayed when an unspecified problem occurs. */
 "wallet.unknownError" = "Nieznany błąd";
 
@@ -1531,13 +1669,22 @@
 /* The title shown on the settings menu to Web3 settings. */
 "wallet.web3" = "Sieć Web3";
 
-/* One of the options for Brave to handle Solana Name Service domain name. 'Ask' means Brave will ask user first before enable or disable resolving SNS domain name. */
+/* Title on the button that users can click to disable Brave to resolve the ENS/SNS domain they entered. */
+"wallet.web3DomainInterstitialPageButtonDisable" = "Wyłącz";
+
+/* Hyper link copy displayed as part of 'snsDomainInterstitialPageDescription'. It will redirect user to the privay policy webpage of the server that Brave uses to resolve SNS domain. */
+"wallet.web3DomainInterstitialPagePrivacyPolicy" = "polityka prywatności";
+
+/* Hyper link copy displayed as part of 'snsDomainInterstitialPageDescription'. It will redirect user to the 'terms of use' webpage of the server that Brave uses to resolve SNS domain. */
+"wallet.web3DomainInterstitialPageTAndU" = "Regulamin";
+
+/* One of the options for Brave to handle Ethereum/Solana Name Service domain name and IPFS scheme url. 'Ask' means Brave will ask user first before enable or disable resolving ENS/SNS domain name and IPFS scheme url. */
 "wallet.web3DomainOptionAsk" = "Zapytaj";
 
-/* One of the options for Brave to handle Solana Name Service domain name. 'Disabled' means Brave will disable resolving SNS domain name. */
+/* One of the options for Brave to handle Ethereum/Solana Name Service domain name and IPFS scheme url. 'Disabled' means Brave will disable resolving ENS/SNS domain name and IPFS scheme url. */
 "wallet.web3DomainOptionDisabled" = "Wyłączono";
 
-/* One of the options for Brave to handle Solana Name Service domain name. 'Enabled' means Brave will enable resolving SNS domain name. */
+/* One of the options for Brave to handle Ethereum/Solana Name Service domain name and IPFS scheme url. 'Enabled' means Brave will enable resolving ENS/SNS domain name and IPFS scheme url. */
 "wallet.web3DomainOptionEnabled" = "Włączone";
 
 /* The header for the options to resolve Solana Name service domain names. */
@@ -1545,6 +1692,18 @@
 
 /* The title for the options to resolve Solana Name service domain names. */
 "wallet.web3DomainOptionsTitle" = "Używaj nazw domeny Solana Name Service (SNS)";
+
+/* A brief explaination of IPFS on privacy. The first '%@' will be replaced with a link to a Brave article that explains how does IPFS impact users' privacy in details. The second '%@' will be replaced with 'web3IPFSInterstitialIPFSPrivacyLearnMore'. */
+"wallet.web3IPFSInterstitialIPFSPrivacy" = "IFPS (InterPlanetary File System) to sieć publiczna do przechowywania i dostarczania danych w oparciu o model peer-to-peer. Protokół ten różni się parametrami prywatności od protokołu HTTP(S). <a href=%1$@>%2$@</a>";
+
+/* A brief explaination of resolving IPFS scheme url using a public gateway. */
+"wallet.web3IPFSInterstitialIPFSPublicGateway" = "Chroni Twój adres IP i treści, których żądasz, przed potencjalnymi obserwatorami będącymi osobami trzecimi, ale nie przed operatorem bramki publicznej. Operator bramki jest odpowiedzialny za dbanie o to, by podawane Ci przez bramkę treści były tymi, których żądasz. Ponadto Twoje urządzenie nie ma wkładu w publiczną sieć IPFS.";
+
+/* The title of the IPFS interstitial page for user to set the preference of IPFS scheme url handling. */
+"wallet.web3IPFSInterstitialIPFSTitle" = "Ustaw swoje preferencje IPFS";
+
+/* The title of the button that user will click to let Brave to resolve IPFS shceme url. */
+"wallet.web3IPFSInterstitialProceedButton" = "Skorzystaj z publicznej bramki";
 
 /* The title for the entry displaying the preferred option to allow web3 sites to access the Ethereum provider API. */
 "wallet.web3PreferencesAllowEthProviderAccess" = "Witryny mogą prosić o dostęp do Twojego portfela Ethereum";
@@ -1566,6 +1725,12 @@
 
 /* The section title for users to set up preferences for interation with web3 sites. */
 "wallet.web3PreferencesSectionTitle" = "Preferencje Web3";
+
+/* The title of the toggle for user to enable/disable NFT discovery inside Web3 settings. */
+"wallet.web3SettingsEnableNFTDiscovery" = "Włącz odkrywanie NFT";
+
+/* The footer of the toggle for user to enable/disable NFT discovery inside Web3 settings. */
+"wallet.web3SettingsEnableNFTDiscoveryFooter" = "Automatycznie dodawaj posiadane przez siebie NFT do portfela za pomocą API innych firm. [Learn more](%@)";
 
 /* Description of the wrong IPFS gateway alert */
 "wallet.wrongGatewayAlertDescription" = "Podano nieprawidłowy adres URL. Bramka powinna być w stanie obsługiwać zasoby IPFS.";

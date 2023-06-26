@@ -39,13 +39,13 @@ private struct EditTokenView: View {
             token: assetStore.token,
             network: assetStore.network,
             url: nftMetadata?.imageURL,
-            shouldShowNativeTokenIcon: true
+            shouldShowNetworkIcon: true
           )
         } else {
           AssetIconView(
             token: assetStore.token,
             network: assetStore.network,
-            shouldShowNativeTokenIcon: true
+            shouldShowNetworkIcon: true
           )
         }
         VStack(alignment: .leading) {
@@ -99,12 +99,10 @@ struct EditUserAssetsView: View {
     Button(action: {
       self.isPresentingNetworkFilter = true
     }) {
-      HStack {
-        Image(braveSystemName: "brave.text.alignleft")
-        Text(userAssetsStore.networkFilter.title)
-      }
-      .font(.footnote.weight(.medium))
-      .foregroundColor(Color(.braveBlurpleTint))
+      Image(braveSystemName: "leo.tune")
+        .font(.footnote.weight(.medium))
+        .foregroundColor(Color(.braveBlurpleTint))
+        .clipShape(Rectangle())
     }
   }
   
@@ -195,7 +193,8 @@ struct EditUserAssetsView: View {
         networkSelectionStore: networkStore.openNetworkSelectionStore(mode: .formSelection),
         keyringStore: keyringStore,
         userAssetStore: userAssetsStore,
-        tokenNeedsTokenId: tokenNeedsTokenId
+        tokenNeedsTokenId: tokenNeedsTokenId,
+        supportedTokenTypes: [.nft]
       )
       .onDisappear {
         networkStore.closeNetworkSelectionStore()
@@ -211,8 +210,11 @@ struct EditUserAssetsView: View {
     .background(Color.clear.sheet(isPresented: $isPresentingNetworkFilter) {
       NavigationView {
         NetworkFilterView(
-          networkFilter: $userAssetsStore.networkFilter,
-          networkStore: networkStore
+          networks: userAssetsStore.networkFilters,
+          networkStore: networkStore,
+          saveAction: { selectedNetworks in
+            userAssetsStore.networkFilters = selectedNetworks
+          }
         )
       }
       .onDisappear {

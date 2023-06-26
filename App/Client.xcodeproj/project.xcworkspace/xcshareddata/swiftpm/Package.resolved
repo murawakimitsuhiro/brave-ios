@@ -23,8 +23,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/GuardianFirewall/GuardianConnect",
       "state" : {
-        "revision" : "9e8c72912189670e4f865cc13cfcd4cdd6e994b7",
-        "version" : "1.7.2"
+        "revision" : "2b97ae55edd9642cf721520129e807e576642e4f",
+        "version" : "1.8.5"
       }
     },
     {
@@ -65,7 +65,7 @@
     {
       "identity" : "sdwebimageswiftui",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/SDWebImage/SDWebImageSwiftUI.git",
+      "location" : "https://github.com/SDWebImage/SDWebImageSwiftUI",
       "state" : {
         "revision" : "ed288667c909c89127ab1b690113a3e397af3098",
         "version" : "2.2.1"
@@ -112,8 +112,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-collections",
       "state" : {
-        "revision" : "9d8719c8bebdc79740b6969c912ac706eb721d7a",
-        "version" : "0.0.7"
+        "revision" : "937e904258d22af6e447a0b72c0bc67583ef64a2",
+        "version" : "1.0.4"
       }
     },
     {
@@ -168,6 +168,14 @@
       "state" : {
         "revision" : "e421a7b3440a271834337694e6050133a3958bc7",
         "version" : "2.7.0"
+      }
+    },
+    {
+      "identity" : "webrtc",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/jitsi/webrtc",
+      "state" : {
+        "revision" : "83690c8ecfd2d745eb0a41c77de6c4e740c18b80"
       }
     },
     {

@@ -3,7 +3,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-import BraveShared
+import Preferences
 import struct Shared.Strings
 import BraveCore
 
@@ -56,13 +56,42 @@ extension Preferences {
       case .sol:
         Preferences.Wallet.defaultSolWallet.reset()
         Preferences.Wallet.allowSolProviderAccess.reset()
-      case .fil:
+      case .fil, .btc:
         // not supported
         fallthrough
       @unknown default:
         return
       }
     }
+    
+    public enum Web3IPFSOption: Int, Identifiable, CaseIterable {
+      case ask
+      case enabled
+      case disabled
+      
+      public var id: Int {
+        rawValue
+      }
+      
+      public var name: String {
+        switch self {
+        case .ask:
+          return Strings.Wallet.web3DomainOptionAsk
+        case .enabled:
+          return Strings.Wallet.web3DomainOptionEnabled
+        case .disabled:
+          return Strings.Wallet.web3DomainOptionDisabled
+        }
+      }
+    }
+    
+    public static let resolveIPFSResources = Option<Int>(key: "web3.resolve-ipfs-resources", default: Web3IPFSOption.ask.rawValue)
+    
+    /// Used to track whether to prompt user to enable NFT discovery
+    public static let shouldShowNFTDiscoveryPermissionCallout = Option<Bool>(key: "wallet.show-nft-discovery-permission-callout", default: true)
+   
+    /// Used to track whether to migrate user assets stored in BraveCore to CoreData
+    static let migrateCoreToWalletUserAssetCompleted = Option<Bool>(key: "wallet.core-to-wallet-user-asset", default: false)
   }
 }
 

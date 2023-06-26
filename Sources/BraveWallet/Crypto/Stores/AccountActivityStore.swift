@@ -32,7 +32,8 @@ class AccountActivityStore: ObservableObject {
   private let txService: BraveWalletTxService
   private let blockchainRegistry: BraveWalletBlockchainRegistry
   private let solTxManagerProxy: BraveWalletSolanaTxManagerProxy
-  private let ipfsApi: IpfsAPI?
+  private let ipfsApi: IpfsAPI
+  private let assetManager: WalletUserAssetManagerType
   /// Cache for storing `BlockchainToken`s that are not in user assets or our token registry.
   /// This could occur with a dapp creating a transaction.
   private var tokenInfoCache: [String: BraveWallet.BlockchainToken] = [:]
@@ -47,7 +48,8 @@ class AccountActivityStore: ObservableObject {
     txService: BraveWalletTxService,
     blockchainRegistry: BraveWalletBlockchainRegistry,
     solTxManagerProxy: BraveWalletSolanaTxManagerProxy,
-    ipfsApi: IpfsAPI?
+    ipfsApi: IpfsAPI,
+    userAssetManager: WalletUserAssetManagerType
   ) {
     self.account = account
     self.observeAccountUpdates = observeAccountUpdates
@@ -59,6 +61,7 @@ class AccountActivityStore: ObservableObject {
     self.blockchainRegistry = blockchainRegistry
     self.solTxManagerProxy = solTxManagerProxy
     self.ipfsApi = ipfsApi
+    self.assetManager = userAssetManager
     
     self.keyringService.add(self)
     self.rpcService.add(self)
@@ -73,7 +76,7 @@ class AccountActivityStore: ObservableObject {
   func update() {
     Task { @MainActor in
       let coin = account.coin
-      let networks = await rpcService.allNetworks(coin)
+      let networksForAccountCoin = await rpcService.allNetworks(coin)
         .filter { $0.chainId != BraveWallet.LocalhostChainId } // localhost not supported
       
       struct NetworkAssets: Equatable {
@@ -81,8 +84,8 @@ class AccountActivityStore: ObservableObject {
         let tokens: [BraveWallet.BlockchainToken]
         let sortOrder: Int
       }
-      let allVisibleUserAssets = await walletService.allVisibleUserAssets(in: networks)
-      let allTokens = await blockchainRegistry.allTokens(in: networks).flatMap(\.tokens)
+      let allVisibleUserAssets = assetManager.getAllVisibleAssetsInNetworkAssets(networks: networksForAccountCoin)
+      let allTokens = await blockchainRegistry.allTokens(in: networksForAccountCoin).flatMap(\.tokens)
       var updatedUserVisibleAssets: [AssetViewModel] = []
       var updatedUserVisibleNFTs: [NFTAssetViewModel] = []
       for networkAssets in allVisibleUserAssets {
@@ -187,14 +190,14 @@ class AccountActivityStore: ObservableObject {
       self.userVisibleAssets = updatedUserVisibleAssets
       self.userVisibleNFTs = updatedUserVisibleNFTs
       
-      let selectedNetworkForAccountCoin = await rpcService.network(coin)
       let assetRatios = self.userVisibleAssets.reduce(into: [String: Double](), {
         $0[$1.token.assetRatioId.lowercased()] = Double($1.price)
       })
+      
       self.transactionSummaries = await fetchTransactionSummarys(
-        network: selectedNetworkForAccountCoin,
+        networksForAccountCoin: networksForAccountCoin,
         accountInfos: keyringForAccount.accountInfos,
-        userVisibleTokens: userVisibleAssets.map(\.token).filter { $0.chainId == selectedNetworkForAccountCoin.chainId },
+        userVisibleTokens: userVisibleAssets.map(\.token),
         allTokens: allTokens,
         assetRatios: assetRatios
       )
@@ -202,16 +205,16 @@ class AccountActivityStore: ObservableObject {
   }
   
   @MainActor private func fetchTransactionSummarys(
-    network: BraveWallet.NetworkInfo,
+    networksForAccountCoin: [BraveWallet.NetworkInfo],
     accountInfos: [BraveWallet.AccountInfo],
     userVisibleTokens: [BraveWallet.BlockchainToken],
     allTokens: [BraveWallet.BlockchainToken],
     assetRatios: [String: Double]
   ) async -> [TransactionSummary] {
-    let transactions = await txService.allTransactionInfo(account.coin, from: account.address)
+    let transactions = await txService.allTransactions(networks: networksForAccountCoin, for: account)
     var solEstimatedTxFees: [String: UInt64] = [:]
     if account.coin == .sol {
-      solEstimatedTxFees = await solTxManagerProxy.estimatedTxFees(for: transactions.map(\.id))
+      solEstimatedTxFees = await solTxManagerProxy.estimatedTxFees(for: transactions)
     }
     let unknownTokenContractAddresses = transactions
       .flatMap { $0.tokenContractAddresses }
@@ -229,9 +232,11 @@ class AccountActivityStore: ObservableObject {
       allTokens.append(contentsOf: unknownTokens)
     }
     return transactions
-      .sorted(by: { $0.createdTime > $1.createdTime })
-      .map { transaction in
-        TransactionParser.transactionSummary(
+      .compactMap { transaction in
+        guard let network = networksForAccountCoin.first(where: { $0.chainId == transaction.chainId }) else {
+          return nil
+        }
+        return TransactionParser.transactionSummary(
           from: transaction,
           network: network,
           accountInfos: accountInfos,
@@ -241,7 +246,7 @@ class AccountActivityStore: ObservableObject {
           solEstimatedTxFee: solEstimatedTxFees[transaction.id],
           currencyFormatter: currencyFormatter
         )
-      }
+      }.sorted(by: { $0.createdTime > $1.createdTime })
   }
   
   func transactionDetailsStore(for transaction: BraveWallet.TransactionInfo) -> TransactionDetailsStore {
@@ -252,7 +257,8 @@ class AccountActivityStore: ObservableObject {
       rpcService: rpcService,
       assetRatioService: assetRatioService,
       blockchainRegistry: blockchainRegistry,
-      solanaTxManagerProxy: solTxManagerProxy
+      solanaTxManagerProxy: solTxManagerProxy,
+      userAssetManager: assetManager
     )
   }
   
@@ -298,12 +304,12 @@ extension AccountActivityStore: BraveWalletKeyringServiceObserver {
     }
   }
   
-  func accountsAdded(_ coin: BraveWallet.CoinType, addresses: [String]) {
+  func accountsAdded(_ addedAccounts: [BraveWallet.AccountInfo]) {
   }
 }
 
 extension AccountActivityStore: BraveWalletJsonRpcServiceObserver {
-  func chainChangedEvent(_ chainId: String, coin: BraveWallet.CoinType) {
+  func chainChangedEvent(_ chainId: String, coin: BraveWallet.CoinType, origin: URLOrigin?) {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
       // Handle small gap between chain changing and txController having the correct chain Id
       self.update()
@@ -351,6 +357,12 @@ extension AccountActivityStore: BraveWalletBraveWalletServiceObserver {
   func onDefaultSolanaWalletChanged(_ wallet: BraveWallet.DefaultWallet) {
   }
   
+  public func onDiscoverAssetsStarted() {
+  }
+  
   func onDiscoverAssetsCompleted(_ discoveredAssets: [BraveWallet.BlockchainToken]) {
+  }
+  
+  func onResetWallet() {
   }
 }

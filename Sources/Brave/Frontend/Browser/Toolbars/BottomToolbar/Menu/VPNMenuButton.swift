@@ -41,7 +41,7 @@ struct VPNMenuButton: View {
   private func toggleVPN(_ enabled: Bool) {
     if BraveSkusManager.keepShowingSessionExpiredState {
       let alert = BraveSkusManager.sessionExpiredStateAlert(loginCallback: { _ in
-        openURL(BraveUX.braveAccountMainURL)
+        openURL(.brave.account)
       })
       
       displayAlert(alert)
@@ -80,7 +80,7 @@ struct VPNMenuButton: View {
   var body: some View {
     HStack {
       MenuItemHeaderView(
-        icon: UIImage(named: "vpn_menu_icon", in: .module, compatibleWith: nil)!.template,
+        icon: Image(braveSystemName: "leo.product.vpn"),
         title: description == nil ? "Brave VPN" : Strings.OptionsMenu.braveVPNItemTitle,
         subtitle: description)
       Spacer()
@@ -110,7 +110,12 @@ struct VPNMenuButton: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .NEVPNStatusDidChange)) { _ in
       isVPNEnabled = BraveVPN.isConnected
-      isVPNStatusChanging = BraveVPN.reconnectPending
+      
+      if BraveVPN.isConnected {
+        isVPNStatusChanging = false
+      } else {
+        isVPNStatusChanging = BraveVPN.reconnectPending
+      }
     }
   }
 }

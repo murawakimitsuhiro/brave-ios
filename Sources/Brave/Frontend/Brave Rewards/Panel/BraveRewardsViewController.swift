@@ -18,11 +18,10 @@ class BraveRewardsViewController: UIViewController, PopoverContentComponent {
 
   let tab: Tab
   let rewards: BraveRewards
-  let legacyWallet: BraveLedger?
   var actionHandler: ((Action) -> Void)?
 
   private var ledgerObserver: LedgerObserver?
-  private var publisher: Ledger.PublisherInfo? {
+  private var publisher: BraveCore.BraveRewards.PublisherInfo? {
     didSet {
       let isVerified = publisher?.status != .notVerified
       rewardsView.publisherView.learnMoreButton.isHidden = isVerified
@@ -45,10 +44,9 @@ class BraveRewardsViewController: UIViewController, PopoverContentComponent {
 
   private var supportedListCount: Int = 0
 
-  init(tab: Tab, rewards: BraveRewards, legacyWallet: BraveLedger?) {
+  init(tab: Tab, rewards: BraveRewards) {
     self.tab = tab
     self.rewards = rewards
-    self.legacyWallet = legacyWallet
 
     super.init(nibName: nil, bundle: nil)
   }
@@ -117,13 +115,7 @@ class BraveRewardsViewController: UIViewController, PopoverContentComponent {
           }
         }
       }
-      if let legacyWallet = self.legacyWallet, !legacyWallet.isInitialized {
-        legacyWallet.initializeLedgerService({
-          self.reloadData()
-        })
-      } else {
-        self.reloadData()
-      }
+      self.reloadData()
     }
 
     view.snp.makeConstraints {
@@ -176,7 +168,7 @@ class BraveRewardsViewController: UIViewController, PopoverContentComponent {
     guard let publisher = publisher else { return }
     rewards.ledger?.refreshPublisher(withId: publisher.id) { [weak self] status in
       guard let self = self else { return }
-      let copy = publisher.copy() as! Ledger.PublisherInfo  // swiftlint:disable:this force_cast
+      let copy = publisher.copy() as! BraveCore.BraveRewards.PublisherInfo  // swiftlint:disable:this force_cast
       copy.status = status
       self.publisher = copy
 

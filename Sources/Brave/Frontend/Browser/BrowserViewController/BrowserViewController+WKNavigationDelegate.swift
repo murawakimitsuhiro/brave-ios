@@ -6,13 +6,15 @@ import Foundation
 import WebKit
 import Shared
 import Data
-import BraveShared
+import BraveShields
+import Preferences
 import BraveCore
 import BraveUI
 import BraveWallet
 import os.log
 import Favicon
 import Growth
+import SafariServices
 
 extension WKNavigationAction {
   /// Allow local requests only if the request is privileged.
@@ -66,7 +68,9 @@ extension BrowserViewController: WKNavigationDelegate {
       }
     }
 
-    updateFindInPageVisibility(visible: false)
+    if #unavailable(iOS 16.0) {
+      updateFindInPageVisibility(visible: false)
+    }
     displayPageZoom(visible: false)
 
     // If we are going to navigate to a new page, hide the reader mode button. Unless we
@@ -126,16 +130,13 @@ extension BrowserViewController: WKNavigationDelegate {
 
   @MainActor
   public func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, preferences: WKWebpagePreferences) async -> (WKNavigationActionPolicy, WKWebpagePreferences) {
-    guard let url = navigationAction.request.url else {
+    guard var url = navigationAction.request.url else {
       return (.cancel, preferences)
     }
-    
-    #if DEBUG
-    ContentBlockerManager.log.debug("Nav: \(url.absoluteString)")
-    #endif
 
     if InternalURL.isValid(url: url) {
-      if navigationAction.navigationType != .backForward, navigationAction.isInternalUnprivileged {
+      if navigationAction.navigationType != .backForward, navigationAction.isInternalUnprivileged,
+          (navigationAction.sourceFrame != nil || navigationAction.targetFrame?.isMainFrame == false || navigationAction.request.cachePolicy == .useProtocolCachePolicy) {
         Logger.module.warning("Denying unprivileged request: \(navigationAction.request)")
         return (.cancel, preferences)
       }
@@ -194,6 +195,51 @@ extension BrowserViewController: WKNavigationDelegate {
       handleExternalURL(url, tab: tab, navigationAction: navigationAction)
       return (.cancel, preferences)
     }
+    
+    // Handling calendar .ics files
+    if navigationAction.targetFrame?.isMainFrame == true, url.pathExtension.lowercased() == "ics" {
+      // This is not ideal. It pushes a new view controller on top of the BVC
+      // and you have to dismiss it manually after you managed the calendar event.
+      // I do not see a workaround for it, Chrome iOS does the same thing.
+      let vc = SFSafariViewController(url: url, configuration: .init())
+      vc.modalPresentationStyle = .formSheet
+      self.present(vc, animated: true)
+      
+      return (.cancel, preferences)
+    }
+    
+    // handles IPFS URL schemes
+    if url.isIPFSScheme {
+      if navigationAction.targetFrame?.isMainFrame == true {
+        handleIPFSSchemeURL(url, visitType: .link)
+      }
+      return (.cancel, preferences)
+    }
+    
+    // handles Decentralized DNS
+    if let decentralizedDNSHelper = self.decentralizedDNSHelperFor(url: url),
+       navigationAction.targetFrame?.isMainFrame == true {
+      topToolbar.locationView.loading = true
+      let result = await decentralizedDNSHelper.lookup(domain: url.schemelessAbsoluteDisplayString)
+      topToolbar.locationView.loading = tabManager.selectedTab?.loading ?? false
+      guard !Task.isCancelled else { // user pressed stop, or typed new url
+        return (.cancel, preferences)
+      }
+      switch result {
+      case let .loadInterstitial(service):
+        showWeb3ServiceInterstitialPage(service: service, originalURL: url, visitType: .link)
+        return (.cancel, preferences)
+      case let .load(resolvedURL):
+        if resolvedURL.isIPFSScheme {
+          handleIPFSSchemeURL(resolvedURL, visitType: .link)
+          return (.cancel, preferences)
+        } else { // non-ipfs, treat as normal url / link tapped
+          url = resolvedURL
+        }
+      case .none:
+        break
+      }
+    }
 
     let isPrivateBrowsing = PrivateBrowsingManager.shared.isPrivateBrowsing
     
@@ -220,8 +266,6 @@ extension BrowserViewController: WKNavigationDelegate {
       }
       
       let domainForMainFrame = Domain.getOrCreate(forUrl: mainDocumentURL, persistent: !isPrivateBrowsing)
-      // Enable safe browsing (frodulent website warnings)
-      webView.configuration.preferences.isFraudulentWebsiteWarningEnabled = domainForMainFrame.isShieldExpected(.SafeBrowsing, considerAllShieldsOption: true)
       
       // Debouncing logic
       // Handle debouncing for main frame only and only if the site (etld+1) changes
@@ -234,7 +278,7 @@ extension BrowserViewController: WKNavigationDelegate {
         // Lets get the redirect chain.
         // Then we simply get all elements up until the user allows us to redirect
         // (i.e. appropriate settings are enabled for that redirect rule)
-        let redirectChain = DebouncingResourceDownloader.shared
+        let redirectChain = DebouncingService.shared
           .redirectChain(for: url)
           .contiguousUntil { _, rule in
             return rule.preferences.allSatisfy { pref in
@@ -354,7 +398,7 @@ extension BrowserViewController: WKNavigationDelegate {
         let domainForShields = Domain.getOrCreate(forUrl: mainDocumentURL, persistent: !isPrivateBrowsing)
         
         // Load rule lists
-        let ruleLists = ContentBlockerManager.shared.ruleLists(for: domainForShields)
+        let ruleLists = await ContentBlockerManager.shared.ruleLists(for: domainForShields)
         tab?.contentBlocker.set(ruleLists: ruleLists)
         
         let isScriptsEnabled = !domainForShields.isShieldExpected(.NoScript, considerAllShieldsOption: true)
@@ -539,7 +583,7 @@ extension BrowserViewController: WKNavigationDelegate {
         return (.cancelAuthenticationChallenge, nil)
       }
     }
-
+    
     // URLAuthenticationChallenge isn't Sendable atm
     let protectionSpace = challenge.protectionSpace
     let credential = challenge.proposedCredential
@@ -555,15 +599,13 @@ extension BrowserViewController: WKNavigationDelegate {
       
       // The challenge may come from a background tab, so ensure it's the one visible.
       tabManager.selectTab(tab)
-      
-      let loginsHelper = tab.getContentScript(name: LoginsScriptHandler.scriptName) as? LoginsScriptHandler
+
       do {
         let credentials = try await Authenticator.handleAuthRequest(
           self,
           credential: credential,
           protectionSpace: protectionSpace,
-          previousFailureCount: previousFailureCount,
-          loginsHelper: loginsHelper
+          previousFailureCount: previousFailureCount
         )
         return (.useCredential, credentials.credentials)
       } catch {
@@ -577,9 +619,34 @@ extension BrowserViewController: WKNavigationDelegate {
     // Set the committed url which will also set tab.url
     tab.committedURL = webView.url
     
+    DispatchQueue.main.async {
+      // Server Trust and URL is also updated in didCommit
+      // However, WebKit does NOT trigger the `serverTrust` observer when the URL changes, but the trust has not.
+      // So manually trigger it with the current trust.
+      self.observeValue(forKeyPath: KVOConstants.serverTrust.keyPath,
+                        of: webView,
+                        change: [.newKey: webView.serverTrust, .kindKey: 1],
+                        context: nil)
+    }
+    
     // Need to evaluate Night mode script injection after url is set inside the Tab
     tab.nightMode = Preferences.General.nightModeEnabled.value
     tab.clearSolanaConnectedAccounts()
+    
+    // Providers need re-initialized when changing origin to align with desktop in
+    // `BraveContentBrowserClient::RegisterBrowserInterfaceBindersForFrame`
+    // https://github.com/brave/brave-core/blob/1.52.x/browser/brave_content_browser_client.cc#L608
+    if let provider = braveCore.braveWalletAPI.ethereumProvider(with: tab, isPrivateBrowsing: tab.isPrivate) {
+      // The Ethereum provider will fetch allowed accounts from it's delegate (the tab)
+      // on initialization. Fetching allowed accounts requires the origin; so we need to
+      // initialize after `commitedURL` / `url` are updated above
+      tab.walletEthProvider = provider
+      tab.walletEthProvider?.`init`(tab)
+    }
+    if let provider = braveCore.braveWalletAPI.solanaProvider(with: tab, isPrivateBrowsing: tab.isPrivate) {
+      tab.walletSolProvider = provider
+      tab.walletSolProvider?.`init`(tab)
+    }
 
     rewards.reportTabNavigation(tabId: tab.rewardsId)
 

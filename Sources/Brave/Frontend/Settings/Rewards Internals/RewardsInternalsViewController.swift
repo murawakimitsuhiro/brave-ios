@@ -28,35 +28,13 @@ private class WarningCell: MultilineSubtitleCell {
 class RewardsInternalsViewController: TableViewController {
 
   private let ledger: BraveLedger
-  private var internalsInfo: Ledger.RewardsInternalsInfo?
+  private var internalsInfo: BraveCore.BraveRewards.RewardsInternalsInfo?
 
-  private let legacyLedger: BraveLedger?
-  private var legacyInternalsInfo: Ledger.RewardsInternalsInfo?
-  private var hasTransferrableBalance = false
-
-  init(ledger: BraveLedger, legacyLedger: BraveLedger?) {
+  init(ledger: BraveLedger) {
     self.ledger = ledger
-    self.legacyLedger = legacyLedger
     super.init(style: .insetGrouped)
-    let group = DispatchGroup()
-    group.enter()
     ledger.rewardsInternalInfo { [weak self] info in
       self?.internalsInfo = info
-      group.leave()
-    }
-    if let legacyLedger = legacyLedger {
-      group.enter()
-      legacyLedger.rewardsInternalInfo { [weak self] info in
-        self?.legacyInternalsInfo = info
-        group.leave()
-      }
-      group.enter()
-      legacyLedger.transferrableAmount { [weak self] amount in
-        self?.hasTransferrableBalance = amount > 0
-        group.leave()
-      }
-    }
-    group.notify(queue: .main) { [weak self] in
       self?.reloadSections()
     }
   }
@@ -91,7 +69,7 @@ class RewardsInternalsViewController: TableViewController {
       $0.dateStyle = .short
     }
 
-    var sections: [Static.Section] = [
+    let sections: [Static.Section] = [
       .init(
         rows: [
           Row(text: Strings.RewardsInternals.sharingWarningTitle, detailText: Strings.RewardsInternals.sharingWarningMessage, cellClass: WarningCell.self)
@@ -121,28 +99,6 @@ class RewardsInternalsViewController: TableViewController {
       ),
     ]
 
-    if let legacyLedger = legacyLedger, let internals = legacyInternalsInfo, !legacyLedger.isLedgerTransferExpired {
-      let legacyWalletSection = sections.count
-      sections.append(
-        .init(
-          header: .title(Strings.RewardsInternals.legacyWalletInfoHeader),
-          rows: [
-            Row(text: Strings.RewardsInternals.keyInfoSeed, detailText: "\(internals.isKeyInfoSeedValid ? Strings.RewardsInternals.valid : Strings.RewardsInternals.invalid)"),
-            Row(
-              text: Strings.RewardsInternals.walletPaymentID, detailText: internals.paymentId,
-              selection: { [unowned self] in
-                if let index = self.dataSource.sections[safe: legacyWalletSection]?.rows.firstIndex(where: { $0.cellClass == PaymentIDCell.self }),
-                  let cell = self.tableView.cellForRow(at: IndexPath(item: index, section: legacyWalletSection)) as? PaymentIDCell {
-                  cell.showMenu()
-                }
-              }, cellClass: PaymentIDCell.self),
-            Row(text: Strings.RewardsInternals.walletCreationDate, detailText: dateFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(internals.bootStamp)))),
-            Row(text: Strings.RewardsInternals.legacyWalletHasTransferrableBalance, detailText: hasTransferrableBalance ? Strings.yes : Strings.no),
-          ]
-        )
-      )
-    }
-
     dataSource.sections = sections
   }
 }
@@ -152,7 +108,7 @@ class RewardsInternalsViewController: TableViewController {
 struct RewardsInternalsBasicInfoGenerator: RewardsInternalsFileGenerator {
   func generateFiles(at path: String, using builder: RewardsInternalsSharableBuilder, completion: @escaping (Error?) -> Void) {
     // Only 1 file to make here
-    var internals: Ledger.RewardsInternalsInfo?
+    var internals: BraveCore.BraveRewards.RewardsInternalsInfo?
     builder.ledger.rewardsInternalInfo { info in
       internals = info
     }
@@ -162,10 +118,10 @@ struct RewardsInternalsBasicInfoGenerator: RewardsInternalsFileGenerator {
     }
 
     let data: [String: Any] = [
-      "Wallet Info": [
+      "Rewards Profile Info": [
         "Key Info Seed": "\(info.isKeyInfoSeedValid ? "Valid" : "Invalid")",
-        "Wallet Payment ID": info.paymentId,
-        "Wallet Creation Date": builder.dateFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(info.bootStamp))),
+        "Rewards Payment ID": info.paymentId,
+        "Rewards Profile Creation Date": builder.dateFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(info.bootStamp))),
       ],
       "Device Info": [
         "DeviceCheck Status": DCDevice.current.isSupported ? "Supported" : "Not supported",

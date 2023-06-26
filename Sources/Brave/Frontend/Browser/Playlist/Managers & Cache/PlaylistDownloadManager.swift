@@ -388,10 +388,10 @@ private class PlaylistHLSDownloadManager: NSObject, AVAssetDownloadDelegate {
         }
 
       case (NSURLErrorDomain, NSURLErrorUnknown):
-        assertionFailure("Downloading HLS streams is not supported on the simulator.")
+        Logger.module.error("Downloading HLS streams is not supported on the simulator.")
 
       default:
-        assertionFailure("An unknown error occured while attempting to download the playlist item: \(error.localizedDescription)")
+        Logger.module.error("An unknown error occurred while attempting to donwload the playlist item: \(error)")
       }
 
       DispatchQueue.main.async {
@@ -450,8 +450,7 @@ private class PlaylistFileDownloadManager: NSObject, URLSessionDownloadDelegate 
         ensureMainThread {
           if task.state != .completed,
             let item = PlaylistItem.getItem(uuid: itemId),
-            let mediaSrc = item.mediaSrc,
-            let assetUrl = URL(string: mediaSrc) {
+            let assetUrl = URL(string: item.mediaSrc) {
             let info = PlaylistInfo(item: item)
             let asset = MediaDownloadTask(id: info.tagId, name: info.name, asset: AVURLAsset(url: assetUrl, options: AVAsset.defaultOptions))
             self.activeDownloadTasks[task] = asset
@@ -583,9 +582,9 @@ private class PlaylistFileDownloadManager: NSObject, URLSessionDownloadDelegate 
 
       // Detect based on Content-Type header.
       if detectedFileExtension == nil,
-        let contentType = response.allHeaderFields["Content-Type"] as? String,
-        let detectedExtension = PlaylistMimeTypeDetector(mimeType: contentType).fileExtension {
-        detectedFileExtension = detectedExtension
+         let contentType = response.value(forHTTPHeaderField: "Content-Type"),
+         let detectedExtension = PlaylistMimeTypeDetector(mimeType: contentType).fileExtension {
+          detectedFileExtension = detectedExtension
       }
 
       // Detect based on Data.

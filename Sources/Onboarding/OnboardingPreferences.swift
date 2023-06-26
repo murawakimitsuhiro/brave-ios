@@ -3,9 +3,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-import BraveShared
-import struct Shared.Strings
-import BraveCore
+import Preferences
 
 extension Preferences {
   public final class Onboarding {
@@ -30,6 +28,9 @@ extension Preferences {
     public static let p3aOnboardingShown = Option<Bool>(
       key: "onboarding.basic-onboarding-default-browser-selected",
       default: false)
+    
+    /// Whether the link vpn receipt alert has been shown.
+    public static let linkReceiptShown = Option<Bool>(key: "onboarding.link-receipt", default: false)
     
     /// Whether this is a new user who installed the application after onboarding retention updates
     public static let isNewRetentionUser = Option<Bool?>(key: "general.new-retention", default: nil)

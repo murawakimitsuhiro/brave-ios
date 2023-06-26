@@ -7,6 +7,7 @@ import BraveCore
 import Data
 import Shared
 import BraveShared
+import Preferences
 import BraveUI
 import Onboarding
 import Storage
@@ -31,7 +32,7 @@ extension BrowserViewController {
   func showRewardsDebugSettings() {
     if AppConstants.buildChannel.isPublic { return }
 
-    let settings = RewardsDebugSettingsViewController(rewards: rewards, legacyWallet: legacyWallet)
+    let settings = RewardsDebugSettingsViewController(rewards: rewards)
     let container = UINavigationController(rootViewController: settings)
     present(container, animated: true)
   }
@@ -58,16 +59,20 @@ extension BrowserViewController {
     updateRewardsButtonState()
 
     guard let tab = tabManager.selectedTab else { return }
-
+    
+    if #available(iOS 16.0, *) {
+      // System components sit on top so we want to dismiss it
+      tab.webView?.findInteraction?.dismissFindNavigator()
+    }
+    
     let braveRewardsPanel = BraveRewardsViewController(
       tab: tab,
-      rewards: rewards,
-      legacyWallet: legacyWallet
+      rewards: rewards
     )
     braveRewardsPanel.actionHandler = { [weak self] action in
       switch action {
       case .unverifiedPublisherLearnMoreTapped:
-        self?.loadNewTabWithRewardsURL(BraveUX.braveRewardsUnverifiedPublisherLearnMoreURL)
+        self?.loadNewTabWithRewardsURL(.brave.rewardsUnverifiedPublisherLearnMoreURL)
       }
     }
 
@@ -167,11 +172,9 @@ extension BrowserViewController {
   func setupLedger() {
     guard let ledger = rewards.ledger else { return }
     // Update defaults
-    ledger.minimumVisitDuration = 8
-    ledger.minimumNumberOfVisits = 1
-    ledger.allowUnverifiedPublishers = false
-    ledger.allowVideoContributions = true
-    ledger.contributionAmount = Double.greatestFiniteMagnitude
+    ledger.setMinimumVisitDuration(8)
+    ledger.setMinimumNumberOfVisits(1)
+    ledger.setContributionAmount(Double.greatestFiniteMagnitude)
 
     // Create ledger observer
     let rewardsObserver = LedgerObserver(ledger: ledger)
@@ -189,8 +192,10 @@ extension BrowserViewController {
       self?.claimPendingPromotions()
     }
     rewardsObserver.fetchedPanelPublisher = { [weak self] publisher, tabId in
-      guard let self = self, self.isViewLoaded, let tab = self.tabManager.selectedTab, tab.rewardsId == tabId else { return }
-      self.publisher = publisher
+      DispatchQueue.main.async {
+        guard let self = self, self.isViewLoaded, let tab = self.tabManager.selectedTab, tab.rewardsId == tabId else { return }
+        self.publisher = publisher
+      }
     }
 
     promotionFetchTimer = Timer.scheduledTimer(

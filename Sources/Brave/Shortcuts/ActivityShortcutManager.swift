@@ -5,7 +5,7 @@
 
 import Shared
 import Data
-import BraveShared
+import Preferences
 import Intents
 import CoreSpotlight
 import MobileCoreServices
@@ -169,7 +169,7 @@ public class ActivityShortcutManager: NSObject {
         })
         controller.viewDidDisappear = {
           if Preferences.Review.braveNewsCriteriaPassed.value {
-            AppReviewManager.shared.isReviewRequired = true
+            AppReviewManager.shared.isRevisedReviewRequired = true
             Preferences.Review.braveNewsCriteriaPassed.value = false
           }
         }
@@ -177,6 +177,8 @@ public class ActivityShortcutManager: NSObject {
         bvc.present(container, animated: true)
       }
     case .openPlayList:
+      bvc.popToBVC()
+      
       let tab = bvc.tabManager.selectedTab
       PlaylistCarplayManager.shared.getPlaylistController(tab: tab) { playlistController in
         playlistController.modalPresentationStyle = .fullScreen

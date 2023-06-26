@@ -7,7 +7,7 @@ import UIKit
 import Shared
 import SwiftUI
 import BraveCore
-import BraveShared
+import Preferences
 import Combine
 import Data
 import SnapKit
@@ -46,6 +46,8 @@ class TabTrayController: LoadingViewController {
 
   let tabManager: TabManager
   let braveCore: BraveCoreMain
+  
+  private let windowProtection: WindowProtection?
   private var openTabsSessionServiceListener: OpenTabsSessionStateListener?
   private var syncServicStateListener: AnyObject?
 
@@ -153,10 +155,13 @@ class TabTrayController: LoadingViewController {
   }
 
   let privateModeButton = SelectedInsetButton().then {
+    $0.setTitle(Strings.private, for: .normal)
     $0.titleLabel?.font = .preferredFont(forTextStyle: .body)
     $0.titleLabel?.adjustsFontForContentSizeCategory = true
     $0.contentHorizontalAlignment = .left
-    $0.setTitle(Strings.private, for: .normal)
+    $0.titleLabel?.adjustsFontSizeToFitWidth = true
+    $0.accessibilityLabel = Strings.done
+    $0.accessibilityIdentifier = "TabTrayController.privateButton"
     $0.tintColor = .braveLabel
 
     if Preferences.Privacy.privateBrowsingOnly.value {
@@ -180,9 +185,11 @@ class TabTrayController: LoadingViewController {
 
   // MARK: Lifecycle
   
-  init(tabManager: TabManager, braveCore: BraveCoreMain) {
+  init(tabManager: TabManager, braveCore: BraveCoreMain, windowProtection: WindowProtection?) {
     self.tabManager = tabManager
     self.braveCore = braveCore
+    self.windowProtection = windowProtection
+    
     super.init(nibName: nil, bundle: nil)
 
     if !UIAccessibility.isReduceMotionEnabled {
@@ -349,8 +356,8 @@ class TabTrayController: LoadingViewController {
   }
   
   private func createTypeSelectorItems() {
-    tabTypeSelectorItems = [UIImage(braveSystemNamed: "brave.rectangle.on.rectangle")!.template,
-                            UIImage(braveSystemNamed: "brave.laptop.and.phone")!.template]
+    tabTypeSelectorItems = [UIImage(braveSystemNamed: "leo.browser.mobile-tabs")!.template,
+                            UIImage(braveSystemNamed: "leo.smartphone.laptop")!.template]
   }
   
   @objc func typeSelectionDidChange(_ sender: UISegmentedControl) {
@@ -635,18 +642,26 @@ class TabTrayController: LoadingViewController {
           with: SyncWelcomeViewController(
             syncAPI: braveCore.syncAPI,
             syncProfileServices: braveCore.syncProfileService,
-            tabManager: tabManager))
+            tabManager: tabManager,
+            windowProtection: windowProtection,
+            isModallyPresented: true))
       case .openTabsDisabled, .noSyncedSessions:
         if !DeviceInfo.hasConnectivity() {
           present(SyncAlerts.noConnection, animated: true)
           return
         }
       
-        openInsideSettingsNavigation(with:
-          SyncSettingsTableViewController(
-            syncAPI: braveCore.syncAPI,
-            syncProfileService: braveCore.syncProfileService,
-            tabManager: tabManager))
+      let syncSettingsScreen = SyncSettingsTableViewController(
+        isModallyPresented: true,
+        syncAPI: braveCore.syncAPI,
+        syncProfileService: braveCore.syncProfileService,
+        tabManager: tabManager,
+        windowProtection: windowProtection,
+        requiresAuthentication: true)
+      
+        syncSettingsScreen.syncStatusDelegate = self
+      
+        openInsideSettingsNavigation(with: syncSettingsScreen)
       default:
         return
     }
@@ -756,5 +771,11 @@ extension TabTrayController: UIScrollViewAccessibilityDelegate {
     } else {
       return String(format: Strings.tabTrayMultiTabPositionFormatVoiceOverText, NSNumber(value: firstTabRow as Int), NSNumber(value: lastTabRow), NSNumber(value: tabCount))
     }
+  }
+}
+
+extension TabTrayController: SyncStatusDelegate {
+  func syncStatusChanged() {
+    tabSyncView.updateSyncStatusPanel(for: emptyPanelState)
   }
 }

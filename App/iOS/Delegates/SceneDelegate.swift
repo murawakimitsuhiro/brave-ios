@@ -17,6 +17,7 @@ import BraveVPN
 import Growth
 import os.log
 import BraveCore
+import Preferences
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
@@ -50,6 +51,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     // initialization. This is because Database container may change. See bugs #3416, #3377.
     DataController.shared.initializeOnce()
     Migration.postCoreDataInitMigrations()
+    Migration.migrateTabStateToWebkitState(diskImageStore: sceneInfo.diskImageStore)
     
     Task(priority: .high) {
       // Start preparing the ad-block services right away
@@ -100,6 +102,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     // Setup Playlist
     // This restores the playlist incomplete downloads. So if a download was started
     // and interrupted on application death, we restart it on next launch.
+    PlaylistManager.shared.setupPlaylistFolder()
     PlaylistManager.shared.restoreSession()
 
     // Setup Playlist Car-Play
@@ -217,11 +220,6 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
   }
 
   func sceneWillEnterForeground(_ scene: UIScene) {
-    // The reason we need to call this method here instead of `applicationDidBecomeActive`
-    // is that this method is only invoked whenever the application is entering the foreground where as
-    // `applicationDidBecomeActive` will get called whenever the Touch ID authentication overlay disappears.
-    DebouncingResourceDownloader.shared.startLoading()
-
     if let scene = scene as? UIWindowScene {
       scene.browserViewController?.windowProtection = windowProtection
     }
@@ -447,11 +445,9 @@ extension BrowserViewController {
           let retryDeadline = Date() + retryTime
 
           Preferences.NewTabPage.superReferrerThemeRetryDeadline.value = retryDeadline
-
-          self.backgroundDataSource
-            .fetchSpecificResource(.superReferral(code: code))
-        } else {
-          self.backgroundDataSource.startFetching()
+          
+          // TODO: Set the code in core somehow if we want to support Super Referrals again
+          //       then call updateSponsoredImageComponentIfNeeded
         }
 
         guard let url = offerUrl?.asURL else { return }
@@ -459,7 +455,6 @@ extension BrowserViewController {
       }
     } else {
       urp.pingIfEnoughTimePassed()
-      self.backgroundDataSource.startFetching()
     }
   }
 }

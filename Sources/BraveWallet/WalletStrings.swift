@@ -155,6 +155,13 @@ extension Strings {
       value: "Enter account name",
       comment: "The placeholder of the text field which allows the user to edit the account's name"
     )
+    public static let accountNameLengthError = NSLocalizedString(
+      "wallet.accountNameLengthError",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Account name must be at most 30 characters long",
+      comment: "The error shown below the account name field when adding or renaming a wallet account if the length is longer than 30 characters."
+    )
     public static let accountPrivateKey = NSLocalizedString(
       "wallet.accountPrivateKey",
       tableName: "BraveWallet",
@@ -635,7 +642,7 @@ extension Strings {
       "wallet.passwordDoesNotMeetRequirementsError",
       tableName: "BraveWallet",
       bundle: .module,
-      value: "Passwords must be at least 7 characters, and contain at least one letter, one number, and one special character.",
+      value: "Passwords must be at least 8 characters.",
       comment: "The error message displayed when a user enters a password that does not meet the requirements"
     )
     public static let passwordsDontMatchError = NSLocalizedString(
@@ -719,7 +726,7 @@ extension Strings {
       "wallet.settingsResetButtonTitle",
       tableName: "BraveWallet",
       bundle: .module,
-      value: "Reset Brave Wallet",
+      value: "Reset and Clear Wallet Data",
       comment: "The title of a button that will reset the wallet. As in to erase the users wallet from the device"
     )
     public static let settingsResetWalletAlertTitle = NSLocalizedString(
@@ -1482,7 +1489,7 @@ extension Strings {
       "wallet.customTokenTitle",
       tableName: "BraveWallet",
       bundle: .module,
-      value: "Custom",
+      value: "Add Custom Asset",
       comment: "The title displayed on the add custom token screen"
     )
     public static let tokenName = NSLocalizedString(
@@ -3340,6 +3347,20 @@ extension Strings {
       value: "Data",
       comment: "The label displayed beside the Data for an instruction type we don't support decoding. Ex. \"Data: [1, 20, 3, 5, 50]]\""
     )
+    public static let solanaInstructionAddressLookupAcc = NSLocalizedString(
+      "wallet.solanaInstructionAddressLookupAcc",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Address Lookup Table Account",
+      comment: "The label displayed beside the address for the Address Lookup Table Account. Ex. \"Address Lookup Table Account: B1A2...\""
+    )
+    public static let solanaInstructionAddressLookupIndex = NSLocalizedString(
+      "wallet.solanaInstructionAddressLookupIndex",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Address Lookup Table Index",
+      comment: "The label displayed beside the address for the Address Lookup Table Account. Ex. \"Address Lookup Table Index: 1\""
+    )
     public static let solanaSignTransactionWarning = NSLocalizedString(
       "wallet.solanaSignTransactionWarning",
       tableName: "BraveWallet",
@@ -3382,18 +3403,11 @@ extension Strings {
       value: "View original message",
       comment: "The title of the button that users can click to display the sign request message as its original content."
     )
-    public static let allNetworksTitle = NSLocalizedString(
-      "wallet.allNetworksTitle",
-      tableName: "BraveWallet",
-      bundle: .module,
-      value: "All Networks",
-      comment: "The title of the option to filter by all networks, displayed in a view to filter assets between 'All Networks' or a specific Crypto network."
-    )
     public static let networkFilterTitle = NSLocalizedString(
       "wallet.networkFilterTitle",
       tableName: "BraveWallet",
       bundle: .module,
-      value: "Select Network Filter",
+      value: "Select Networks",
       comment: "The title displayed on the view to filter by a network / all networks."
     )
     public static let userAssetSymbolNetworkDesc = NSLocalizedString(
@@ -3520,21 +3534,21 @@ extension Strings {
       tableName: "BraveWallet",
       bundle: .module,
       value: "Ask",
-      comment: "One of the options for Brave to handle Ethereum/Solana Name Service domain name. 'Ask' means Brave will ask user first before enable or disable resolving ENS/SNS domain name."
+      comment: "One of the options for Brave to handle Ethereum/Solana Name Service domain name and IPFS scheme url. 'Ask' means Brave will ask user first before enable or disable resolving ENS/SNS domain name and IPFS scheme url."
     )
     public static let web3DomainOptionEnabled = NSLocalizedString(
       "wallet.web3DomainOptionEnabled",
       tableName: "BraveWallet",
       bundle: .module,
       value: "Enabled",
-      comment: "One of the options for Brave to handle Ethereum/Solana Name Service domain name. 'Enabled' means Brave will enable resolving ENS/SNS domain name."
+      comment: "One of the options for Brave to handle Ethereum/Solana Name Service domain name and IPFS scheme url. 'Enabled' means Brave will enable resolving ENS/SNS domain name and IPFS scheme url."
     )
     public static let web3DomainOptionDisabled = NSLocalizedString(
       "wallet.web3DomainOptionDisabled",
       tableName: "BraveWallet",
       bundle: .module,
       value: "Disabled",
-      comment: "One of the options for Brave to handle Ethereum/Solana Name Service domain name. 'Disabled' means Brave will disable resolving ENS/SNS domain name."
+      comment: "One of the options for Brave to handle Ethereum/Solana Name Service domain name and IPFS scheme url. 'Disabled' means Brave will disable resolving ENS/SNS domain name and IPFS scheme url."
     )
     public static let ensResolveMethodTitle = NSLocalizedString(
       "wallet.ensResolveMethodTitle",
@@ -3551,7 +3565,7 @@ extension Strings {
       comment: "The title for the options to allow Ethereum Name service domain names offchain."
     )
     public static let ensOffchainResolveMethodDescription = NSLocalizedString(
-      "wallet.ensOffchainResolveMethodTitle",
+      "wallet.ensOffchainResolveMethodDescription",
       tableName: "BraveWallet",
       bundle: .module,
       value: "[Learn more](%@) about ENS offchain lookup privacy considerations.",
@@ -3563,6 +3577,20 @@ extension Strings {
       bundle: .module,
       value: "Resolve Solana Name Service (SNS) Domain Names",
       comment: "The title for the options to resolve Solana Name service domain names."
+    )
+    public static let udResolveMethodTitle = NSLocalizedString(
+      "wallet.udResolveMethodTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Resolve Unstoppable Domains Domain Names",
+      comment: "The title for the options to resolve Unstoppable Domains domain names."
+    )
+    public static let udResolveMethodDescription = NSLocalizedString(
+      "wallet.udResolveMethodDescription",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "[Learn more](%@) about Unstoppable Domains privacy considerations.",
+      comment: "The description for the options to allow Unstoppable Domain domain names. '%@' will be replaced with a url to explain more about Unstoppable Domains."
     )
     public static let web3DomainOptionsHeader = NSLocalizedString(
       "wallet.web3DomainOptionsHeader",
@@ -3578,19 +3606,40 @@ extension Strings {
       value: "IPFS",
       comment: "The header of the section under Web3 settings for IPFS NFT gateway setting."
     )
-    public static let nftGatewayTitle = NSLocalizedString(
-      "wallet.nftGatewayTitle",
+    public static let ipfsResourcesOptionsTitle = NSLocalizedString(
+      "wallet.ipfsResourcesOptionsTitle",
       tableName: "BraveWallet",
       bundle: .module,
-      value: "Customize NFT Gateway",
+      value: "Resolve IPFS Resources",
+      comment: "The title of the section under Web3 settings for users to pick an option to resolve IPFS Resources."
+    )
+    public static let ipfsPublicGatewayAddressTitle = NSLocalizedString(
+      "wallet.ipfsPublicGatewayAddressTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "IPFS Public Gateway Address",
+      comment: "The navigation title of the screen for users to customize IPFS public gateway."
+    )
+    public static let ipfsPublicGatewayAddressNFTTitle = NSLocalizedString(
+      "wallet.ipfsPublicGatewayAddressNFTTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "IPFS Public Gateway Address for NFT",
       comment: "The navigation title of the screen for users to customize NFT gateway."
     )
-    public static let ipfsSettingsFooter = NSLocalizedString(
-      "wallet.ipfsSettingsFooter",
+    public static let customizeIPFSPublicGatewayNavTitle = NSLocalizedString(
+      "wallet.customizeIPFSPublicGatewayNavTitle",
       tableName: "BraveWallet",
       bundle: .module,
-      value: "Gateway is used to resolve NFT content in the wallet",
-      comment: "The footer of the section for IPFS NFT gateway setting."
+      value: "Customize IPFS Gateway",
+      comment: "The navigation title of the screen for users to customize ipfs public gateway address."
+    )
+    public static let customizeIPFSNFTPublicGatewayNavTitle = NSLocalizedString(
+      "wallet.customizeIPFSNFTPublicGatewayNavTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Customize IPFS Gateway for NFT",
+      comment: "The navigation title of the screen for users to customize ipfs public gateway address for NFT."
     )
     public static let nftGatewayLongDescription = NSLocalizedString(
       "wallet.nftGatewayLongDescription",
@@ -3731,6 +3780,332 @@ extension Strings {
       bundle: .module,
       value: "Use ENS Domain",
       comment: "Button title when requesting to do an ENS off chain lookup."
+    )
+    public static let web3IPFSInterstitialProceedButton = NSLocalizedString(
+      "wallet.web3IPFSInterstitialProceedButton",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Use a Public Gateway",
+      comment: "The title of the button that user will click to let Brave to resolve IPFS shceme url."
+    )
+    public static let web3IPFSInterstitialIPFSTitle = NSLocalizedString(
+      "wallet.web3IPFSInterstitialIPFSTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Set your IPFS preference",
+      comment: "The title of the IPFS interstitial page for user to set the preference of IPFS scheme url handling."
+    )
+    public static let web3IPFSInterstitialIPFSPrivacy = NSLocalizedString(
+      "wallet.web3IPFSInterstitialIPFSPrivacy",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "IPFS (InterPlanetary File System) is the public network for peer-to-peer data storage and delivery. This protocol has different privacy considerations from HTTP(S). <a href=%@>%@</a>",
+      comment: "A brief explaination of IPFS on privacy. The first '%@' will be replaced with a link to a Brave article that explains how does IPFS impact users' privacy in details. The second '%@' will be replaced with 'web3IPFSInterstitialIPFSPrivacyLearnMore'."
+    )
+    public static let web3IPFSInterstitialIPFSPublicGateway = NSLocalizedString(
+      "wallet.web3IPFSInterstitialIPFSPublicGateway",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Protects your IP address and content you’re requesting from potential third-party observers, but not from the public gateway operator.  The gateway operator is responsible for ensuring that the content served to you over a gateway is the content you requested. Also, your device does not contribute to the public IPFS network.",
+      comment: "A brief explaination of resolving IPFS scheme url using a public gateway."
+    )
+    public static let ipfsErrorTitle = NSLocalizedString(
+      "wallet.ipfsErrorTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "This site can't be reached",
+      comment: "A title will displayed in the IPFS error page when IPFS is disabled."
+    )
+    public static let ipfsResolveMethodDescription = NSLocalizedString(
+      "wallet.ipfsResolveMethodDescription",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "[Learn more](%@) about IPFS gateway privacy considerations.",
+      comment: "The description for the options to allow to resolve IPFS scheme urls. '%@' will be replaced with a url to explain more about IPFS gateway privacy."
+    )
+    public static let web3DomainInterstitialPageTAndU = NSLocalizedString(
+      "wallet.web3DomainInterstitialPageTAndU",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "terms of use",
+      comment: "Hyper link copy displayed as part of 'snsDomainInterstitialPageDescription'. It will redirect user to the 'terms of use' webpage of the server that Brave uses to resolve SNS domain."
+    )
+    public static let web3DomainInterstitialPagePrivacyPolicy = NSLocalizedString(
+      "wallet.web3DomainInterstitialPagePrivacyPolicy",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "privacy policy",
+      comment: "Hyper link copy displayed as part of 'snsDomainInterstitialPageDescription'. It will redirect user to the privay policy webpage of the server that Brave uses to resolve SNS domain."
+    )
+    public static let web3DomainInterstitialPageButtonDisable = NSLocalizedString(
+      "wallet.web3DomainInterstitialPageButtonDisable",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Disable",
+      comment: "Title on the button that users can click to disable Brave to resolve the ENS/SNS domain they entered."
+    )
+    // SNS
+    public static let snsDomainInterstitialPageTitle = NSLocalizedString(
+      "wallet.snsDomainInterstitialPageTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Enable support of Solana Name Service (SNS) in Brave?",
+      comment: "Title displayed when users chose Brave to ask them if they want the SNS to be resolved every time they enter one."
+    )
+    public static let snsDomainInterstitialPageDescription = NSLocalizedString(
+      "wallet.snsDomainInterstitialPageDescription",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Brave will be using Syndica to resolve .sol domain names. Brave hides your IP address. If you enable this, Syndica will see that someone is trying to visit these .sol domains but nothing else. See Syndica's <a href=%@>%@</a> and <a href=%@>%@</a>.",
+      comment: "Description displayed when users chose Brave to ask them if they want the SNS to be resolved every time they enter one. The first '%@' will be replaced with a link to Syndica's terms of use page. The second '%@' will be replaced with the value of 'snsDomainInterstitialPageTAndU'. The third '%@' will be replaced with a link to Syndica's privacy policy page. The last '%@' will be replaced with the value of 'snsDomainInterstitialPagePrivacyPolicy'."
+    )
+    public static let snsDomainInterstitialPageButtonProceed = NSLocalizedString(
+      "wallet.snsDomainInterstitialPageButtonProceed",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Proceed using Syndica server",
+      comment: "Title on the button that users can click to enable Brave to resolve the SNS domain they entered."
+    )
+    // ENS
+    public static let ensDomainInterstitialPageTitle = NSLocalizedString(
+      "wallet.ensDomainInterstitialPageTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Enable support of Ethereum Name Service (ENS) in Brave?",
+      comment: "Title displayed when users chose Brave to ask them if they want the ENS domain to be resolved every time they enter one."
+    )
+    public static let ensDomainInterstitialPageDescription = NSLocalizedString(
+      "wallet.ensDomainInterstitialPageDescription",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Brave will be using Infura to resolve .eth domain names that are on Ethereum Name Service (ENS). Brave hides your IP address. If you enable this, Infura will see that someone is trying to visit these .eth domains but nothing else. See Infura's <a href=%@>%@</a> and <a href=%@>%@</a>.",
+      comment: "Description displayed when users chose Brave to ask them if they want the ENS to be resolved every time they enter one. The first '%@' will be replaced with a link to Infura's terms of use page. The second '%@' will be replaced with the value of 'Web3DomainInterstitialPageTAndU'. The third '%@' will be replaced with a link to Infura's privacy policy page. The last '%@' will be replaced with the value of 'Web3DomainInterstitialPagePrivacyPolicy'."
+    )
+    public static let ensDomainInterstitialPageButtonProceed = NSLocalizedString(
+      "wallet.ensDomainInterstitialPageButtonProceed",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Proceed using Infura server",
+      comment: "Title on the button that users can click to enable Brave to resolve the ENS domain they entered."
+    )
+    // ENS offchain
+    public static let ensOffchainDomainInterstitialPageTitle = NSLocalizedString(
+      "wallet.ensOffchainDomainInterstitialPageTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Enable support of Ethereum Name Service (ENS) offchain lookup in Brave?",
+      comment: "Title displayed when users chose Brave to ask them if they want the ENS Offchain domain to be resolved every time they enter one."
+    )
+    public static let ensOffchainDomainInterstitialPageDescription = NSLocalizedString(
+      "wallet.ensOffchainDomainInterstitialPageDescription",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "This .eth domain name is stored offchain and will be resolved by a third party gateway. If you enable ENS offchain lookup, the third party gateway will see that you're trying to visit the .eth domain. <a href=%@>%@</a>.",
+      comment: "Description displayed when users chose Brave to ask them if they want the ENS to be resolved every time they enter one. The first '%@' will be replaced with a link to Brave Wallet's offchain lookup privacy considerations. The second '%@' will be replaced with the value of 'ensOffchainDomainInterstitialLearnMore'."
+    )
+    public static let ensOffchainDomainInterstitialPageButtonProceed = NSLocalizedString(
+      "wallet.ensOffchainDomainInterstitialPageButtonProceed",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Proceed with offchain lookup",
+      comment: "Title on the button that users can click to enable Brave to resolve the ENS offchain lookup for the domain they entered."
+    )
+    // Unstoppable Domains
+    public static let udDomainInterstitialPageTitle = NSLocalizedString(
+      "wallet.udDomainInterstitialPageTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Enable support of Unstoppable Domains in Brave?",
+      comment: "Title displayed when users chose Brave to ask them if they want the Unstoppable Domains domain to be resolved every time they enter one."
+    )
+    public static let udDomainInterstitialPageDescription = NSLocalizedString(
+      "wallet.udDomainInterstitialPageDescription",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Brave will be using Infura to resolve .crypto (and also %@) domain names that are on Unstoppable Domains. Brave hides your IP address. If you enable this, Infura will see that someone is trying to visit these domains but nothing else. See Infura's <a href=%@>%@</a> and <a href=%@>%@</a>.",
+      comment: "Description displayed when users chose Brave to ask them if they want the Unstoppable Domains to be resolved every time they enter one. The first '%@' will be replaced with a list of supported TLDs like '.x' or '.bitcoin'. The second '%@' be replaced with a link to Infura's terms of use page. The third '%@' will be replaced with the value of 'Web3DomainInterstitialPageTAndU'. The fourth '%@' will be replaced with a link to Infura's privacy policy page. The last '%@' will be replaced with the value of 'Web3DomainInterstitialPagePrivacyPolicy'."
+    )
+    public static let activityPageTitle = NSLocalizedString(
+      "wallet.activityPageTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Activity",
+      comment: "The title of the tab that will display user's transaction activity for all accounts."
+    )
+    public static let activityPageEmptyTitle = NSLocalizedString(
+      "wallet.activityPageEmptyTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "No transactions to view yet",
+      comment: "The title when showing no transactions inside Activity tab."
+    )
+    public static let activityPageEmptyDescription = NSLocalizedString(
+      "wallet.activityPageEmptyDescription",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Once you make a transaction, you'll be able to view it here.",
+      comment: "The description when showing no transactions inside Activity tab."
+    )
+    public static let nftPageTitle = NSLocalizedString(
+      "wallet.nftPageTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "NFT",
+      comment: "The title of the tab that will display user's visible NFT assets."
+    )
+    public static let nftPageEmptyTitle = NSLocalizedString(
+      "wallet.nftPageEmptyTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "No NFTs here yet.",
+      comment: "The title of the empty state inside NFT tab."
+    )
+    public static let nftPageEmptyDescription = NSLocalizedString(
+      "wallet.nftPageEmptyDescription",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Ready to add some? Just tap the button below to import.",
+      comment: "The description of the empty state inside NFT tab."
+    )
+    public static let marketPageTitle = NSLocalizedString(
+      "wallet.marketPageTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Market",
+      comment: "The page title that will display the top 250 tokens from the market via CoinGecko"
+    )
+    public static let coinMarketInformation = NSLocalizedString(
+      "wallet.coinMarketInformation",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Information",
+      comment: "The header title of the section that display coin market information."
+    )
+    public static let coinMarketRank = NSLocalizedString(
+      "wallet.coinMarketRank",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Rank",
+      comment: "The title of the rank of this coin from market."
+    )
+    public static let coinMarket24HVolume = NSLocalizedString(
+      "wallet.coinMarket24HVolume",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "24h Volume",
+      comment: "The title of the 24h volume of this coin from market."
+    )
+    public static let coinMarketMarketCap = NSLocalizedString(
+      "wallet.coinMarketMarketCap",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Market Cap",
+      comment: "The title of the market cap of this coin from market."
+    )
+    public static let coinMarketEmptyMsg = NSLocalizedString(
+      "wallet.coinMarketEmptyMsg",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "No market information available yet",
+      comment: "The message will be displayed when there is no coin market loaded or having an error."
+    )
+    public static let web3SettingsEnableNFTDiscovery = NSLocalizedString(
+      "wallet.web3SettingsEnableNFTDiscovery",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Enable NFT Discovery",
+      comment: "The title of the toggle for user to enable/disable NFT discovery inside Web3 settings."
+    )
+    public static let web3SettingsEnableNFTDiscoveryFooter = NSLocalizedString(
+      "wallet.web3SettingsEnableNFTDiscoveryFooter",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Automatically add NFTs you own to the Wallet using third party APIs. [Learn more](%@)",
+      comment: "The footer of the toggle for user to enable/disable NFT discovery inside Web3 settings."
+    )
+    public static let nftDiscoveryCalloutTitle = NSLocalizedString(
+      "wallet.nftDiscoveryCalloutTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Want your NFTs displayed automatically?",
+      comment: "The title of the alert that asks users either to enable NFT discovery or import manually."
+    )
+    public static let nftDiscoveryCalloutDescription = NSLocalizedString(
+      "wallet.nftDiscoveryCalloutDescription",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Brave Wallet can use a third-party service to automatically display your NFTs. Brave will share your wallet addresses with SimpleHash to provide this service. Learn more.",
+      comment: "The title of the alert that asks users either to enable NFT discovery or import manually. `SimpleHash` is the third-party service name, so it does not need to be translated."
+    )
+    public static let nftDiscoveryCalloutDescriptionLearnMore = NSLocalizedString(
+      "wallet.nftDiscoveryCalloutDescriptionLearnMore",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Learn more",
+      comment: "This is the same `Learn more` at the end of `nftDiscoveryCalloutDescription`, but we need a separat translation to detect the range of it in order to build some attributed strings."
+    )
+    public static let nftDiscoveryCalloutDisable = NSLocalizedString(
+      "wallet.nftDiscoveryCalloutDisable",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "No thanks, I'll do it manually",
+      comment: "The title of the button that user clicks to disable NFT discovery."
+    )
+    public static let nftDiscoveryCalloutEnable = NSLocalizedString(
+      "wallet.nftDiscoveryCalloutEnable",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Yes, proceed",
+      comment: "The title of the button that user clicks to enable NFT discovery."
+    )
+    public static let nftEmptyImportNFT = NSLocalizedString(
+      "wallet.nftEmptyImportNFT",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Import NFT",
+      comment: "The title of the button that user clicks to add his/her first NFT"
+    )
+    public static let selectTokenToSendTitle = NSLocalizedString(
+      "wallet.selectTokenToSendTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Select a Token to Send",
+      comment: "The title of the view that lets the user select a token & account at the same time in the Send crypto view."
+    )
+    public static let selectTokenToSendNoTokens = NSLocalizedString(
+      "wallet.selectTokenToSendNoTokens",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "No available tokens",
+      comment: "The description of the view that lets the user select a token & account at the same time in the Send crypto view when there are no available tokens."
+    )
+    public static let showZeroBalances = NSLocalizedString(
+      "wallet.showZeroBalances",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Show Zero Balances",
+      comment: "The title of a button that updates the filter to show tokens with zero balances."
+    )
+    public static let hideZeroBalances = NSLocalizedString(
+      "wallet.hideZeroBalances",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Hide Zero Balances",
+      comment: "The title of a button that updates the filter to hide tokens with zero balances."
+    )
+    public static let selectAllButtonTitle = NSLocalizedString(
+      "wallet.selectAllButtonTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Select All",
+      comment: "The title of a button that Selects all visible options."
+    )
+    public static let deselectAllButtonTitle = NSLocalizedString(
+      "wallet.deselectAllButtonTitle",
+      tableName: "BraveWallet",
+      bundle: .module,
+      value: "Deselect All",
+      comment: "The title of a button that Deselects all visible options."
     )
   }
 }

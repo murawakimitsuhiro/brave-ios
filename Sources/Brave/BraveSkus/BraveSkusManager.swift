@@ -5,7 +5,7 @@
 
 import Foundation
 import Shared
-import BraveShared
+import Preferences
 import BraveCore
 import BraveVPN
 import os.log
@@ -38,10 +38,6 @@ public class BraveSkusManager {
     guard let manager = BraveSkusManager(isPrivateMode: isPrivate) else {
       return
     }
-    
-    Logger.module.debug("Refreshing sku credential. Clearing old credential from persistence.")
-    
-    BraveVPN.clearSkusCredentials(includeExpirationDate: true)
     
     manager.credentialSummary(for: domain) { completion in
       Logger.module.debug("credentialSummary response")

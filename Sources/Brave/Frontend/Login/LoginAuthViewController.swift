@@ -4,7 +4,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import Foundation
-import BraveShared
+import Preferences
 import BraveUI
 import Shared
 import UIKit
@@ -25,15 +25,17 @@ class LoginAuthViewController: UITableViewController {
     fatalError("init(coder:) has not been implemented")
   }
 
-  override func viewDidLoad() {
-    if requiresAuthentication, Preferences.Privacy.lockWithPasscode.value {
-      askForAuthentication()
-    }
-  }
-
   override func viewWillAppear(_ animated: Bool) {
     super.viewWillAppear(animated)
 
+    if requiresAuthentication, Preferences.Privacy.lockWithPasscode.value {
+      askForAuthentication() { [weak self] success in
+        if !success {
+          self?.navigationController?.popViewController(animated: true)
+        }
+      }
+    }
+    
     NotificationCenter.default.do {
       $0.addObserver(
         self, selector: #selector(removeBackgroundedBlur),

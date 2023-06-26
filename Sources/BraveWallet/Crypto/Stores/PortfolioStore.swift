@@ -7,6 +7,7 @@ import Foundation
 import BraveCore
 import SwiftUI
 import Combine
+import Data
 
 public struct AssetViewModel: Identifiable, Equatable {
   var token: BraveWallet.BlockchainToken
@@ -18,20 +19,21 @@ public struct AssetViewModel: Identifiable, Equatable {
   public var id: String {
     token.id + network.chainId
   }
-}
-
-struct NFTAssetViewModel: Identifiable, Equatable {
-  var token: BraveWallet.BlockchainToken
-  var network: BraveWallet.NetworkInfo
-  var balance: Int
-  var nftMetadata: NFTMetadata?
-
-  public var id: String {
-    token.id + network.chainId
-  }
   
-  static func == (lhs: NFTAssetViewModel, rhs: NFTAssetViewModel) -> Bool {
-    lhs.id == rhs.id
+  /// Sort by the fiat/value of the asset (price x balance), otherwise by balance when price is unavailable.
+  static func sortedByValue(lhs: AssetViewModel, rhs: AssetViewModel) -> Bool {
+    if let lhsPrice = Double(lhs.price),
+       let rhsPrice = Double(rhs.price) {
+      return (lhsPrice * lhs.decimalBalance) > (rhsPrice * rhs.decimalBalance)
+    } else if let lhsPrice = Double(lhs.price), (lhsPrice * lhs.decimalBalance) > 0 {
+      // lhs has a non-zero value
+      return true
+    } else if let rhsPrice = Double(rhs.price), (rhsPrice * rhs.decimalBalance) > 0 {
+      // rhs has a non-zero value
+      return false
+    }
+    // price unavailable, sort by balance
+    return lhs.decimalBalance > rhs.decimalBalance
   }
 }
 
@@ -45,28 +47,12 @@ struct BalanceTimePrice: DataPoint, Equatable {
   }
 }
 
-public enum NetworkFilter: Equatable {
-  case allNetworks
-  case network(BraveWallet.NetworkInfo)
-  
-  var title: String {
-    switch self {
-    case .allNetworks:
-      return Strings.Wallet.allNetworksTitle
-    case let .network(network):
-      return network.chainName
-    }
-  }
-}
-
 /// A store containing data around the users assets
 public class PortfolioStore: ObservableObject {
   /// The dollar amount of your portfolio
   @Published private(set) var balance: String = "$0.00"
   /// The users visible fungible tokens. NFTs are separated into `userVisibleNFTs`.
   @Published private(set) var userVisibleAssets: [AssetViewModel] = []
-  /// The users visible NFTs
-  @Published private(set) var userVisibleNFTs: [NFTAssetViewModel] = []
   /// The timeframe of the portfolio
   @Published var timeframe: BraveWallet.AssetPriceTimeframe = .oneDay {
     didSet {
@@ -88,20 +74,21 @@ public class PortfolioStore: ObservableObject {
     }
   }
   
-  @Published var networkFilter: NetworkFilter = .allNetworks {
+  @Published var networkFilters: [Selectable<BraveWallet.NetworkInfo>] = [] {
     didSet {
+      guard !oldValue.isEmpty else { return } // initial assignment to `networkFilters`
       update()
     }
   }
   @Published private(set) var isLoadingDiscoverAssets: Bool = false
 
   public private(set) lazy var userAssetsStore: UserAssetsStore = .init(
-    walletService: self.walletService,
     blockchainRegistry: self.blockchainRegistry,
     rpcService: self.rpcService,
     keyringService: self.keyringService,
     assetRatioService: self.assetRatioService,
-    ipfsApi: self.ipfsApi
+    ipfsApi: self.ipfsApi,
+    userAssetManager: self.assetManager
   )
   
   let currencyFormatter: NumberFormatter = .usdCurrencyFormatter
@@ -114,15 +101,14 @@ public class PortfolioStore: ObservableObject {
   private var pricesCache: [String: String] = [:]
   /// Cache of priceHistories. The key is the token's `assetRatioId`.
   private var priceHistoriesCache: [String: [BraveWallet.AssetTimePrice]] = [:]
-  /// Cache of metadata for NFTs. The key is the token's `id`.
-  private var metadataCache: [String: NFTMetadata] = [:]
 
   private let keyringService: BraveWalletKeyringService
   private let rpcService: BraveWalletJsonRpcService
   private let walletService: BraveWalletBraveWalletService
   private let assetRatioService: BraveWalletAssetRatioService
   private let blockchainRegistry: BraveWalletBlockchainRegistry
-  private let ipfsApi: IpfsAPI?
+  private let ipfsApi: IpfsAPI
+  private let assetManager: WalletUserAssetManagerType
 
   public init(
     keyringService: BraveWalletKeyringService,
@@ -130,7 +116,8 @@ public class PortfolioStore: ObservableObject {
     walletService: BraveWalletBraveWalletService,
     assetRatioService: BraveWalletAssetRatioService,
     blockchainRegistry: BraveWalletBlockchainRegistry,
-    ipfsApi: IpfsAPI?
+    ipfsApi: IpfsAPI,
+    userAssetManager: WalletUserAssetManagerType
   ) {
     self.keyringService = keyringService
     self.rpcService = rpcService
@@ -138,6 +125,7 @@ public class PortfolioStore: ObservableObject {
     self.assetRatioService = assetRatioService
     self.blockchainRegistry = blockchainRegistry
     self.ipfsApi = ipfsApi
+    self.assetManager = userAssetManager
 
     self.rpcService.add(self)
     self.keyringService.add(self)
@@ -153,59 +141,27 @@ public class PortfolioStore: ObservableObject {
     }
   }
   
-  func discoverAssetsOnAllSupportedChains() {
-    isLoadingDiscoverAssets = true
-    walletService.discoverAssetsOnAllSupportedChains()
-  }
-  
   func update() {
     self.updateTask?.cancel()
     self.updateTask = Task { @MainActor in
       self.isLoadingBalances = true
-      let networks: [BraveWallet.NetworkInfo]
-      switch networkFilter {
-      case .allNetworks:
-        networks = await self.rpcService.allNetworksForSupportedCoins()
-          .filter { !WalletConstants.supportedTestNetworkChainIds.contains($0.chainId) }
-      case let .network(network):
-        networks = [network]
+      // setup network filters if not currently setup
+      if self.networkFilters.isEmpty {
+        self.networkFilters = await self.rpcService.allNetworksForSupportedCoins().map {
+          .init(isSelected: !WalletConstants.supportedTestNetworkChainIds.contains($0.chainId), model: $0)
+        }
       }
+      let networks: [BraveWallet.NetworkInfo] = self.networkFilters.filter(\.isSelected).map(\.model)
       struct NetworkAssets: Equatable {
         let network: BraveWallet.NetworkInfo
         let tokens: [BraveWallet.BlockchainToken]
         let sortOrder: Int
       }
-      let allVisibleUserAssets = await self.walletService.allVisibleUserAssets(in: networks)
-      var updatedUserVisibleAssets: [AssetViewModel] = []
-      var updatedUserVisibleNFTs: [NFTAssetViewModel] = []
-      for networkAssets in allVisibleUserAssets {
-        for token in networkAssets.tokens {
-          if token.isErc721 || token.isNft {
-            updatedUserVisibleNFTs.append(
-              NFTAssetViewModel(
-                token: token,
-                network: networkAssets.network,
-                balance: Int(totalBalancesCache[token.assetBalanceId] ?? 0),
-                nftMetadata: metadataCache[token.id]
-              )
-            )
-          } else {
-            updatedUserVisibleAssets.append(
-              AssetViewModel(
-                token: token,
-                network: networkAssets.network,
-                decimalBalance: totalBalancesCache[token.assetBalanceId] ?? 0,
-                price: pricesCache[token.assetRatioId.lowercased()] ?? "",
-                history: priceHistoriesCache[token.assetRatioId.lowercased()] ?? []
-              )
-            )
-          }
-        }
-      }
+      let allVisibleUserAssets = assetManager.getAllVisibleAssetsInNetworkAssets(networks: networks)
+      var updatedUserVisibleAssets = buildAssetViewModels(allVisibleUserAssets: allVisibleUserAssets)
       // update userVisibleAssets on display immediately with empty values. Issue #5567
       self.userVisibleAssets = updatedUserVisibleAssets
-      self.userVisibleNFTs = updatedUserVisibleNFTs
-      
+        .sorted(by: AssetViewModel.sortedByValue(lhs:rhs:))
       let keyrings = await self.keyringService.keyrings(for: WalletConstants.supportedCoinTypes)
       guard !Task.isCancelled else { return }
       typealias TokenNetworkAccounts = (token: BraveWallet.BlockchainToken, network: BraveWallet.NetworkInfo, accounts: [BraveWallet.AccountInfo])
@@ -260,42 +216,10 @@ public class PortfolioStore: ObservableObject {
         self.priceHistoriesCache[key] = value
       }
       
-      // fetch nft metadata for all NFTs
-      let allNFTs = allTokens.filter { $0.isNft || $0.isErc721 }
-      let allMetadata = await rpcService.fetchNFTMetadata(tokens: allNFTs, ipfsApi: ipfsApi)
-      for (key, value) in allMetadata { // update cached values
-        metadataCache[key] = value
-      }
-      
       guard !Task.isCancelled else { return }
-      updatedUserVisibleAssets.removeAll()
-      updatedUserVisibleNFTs.removeAll()
-      for networkAssets in allVisibleUserAssets {
-        for token in networkAssets.tokens {
-          if token.isErc721 || token.isNft {
-            updatedUserVisibleNFTs.append(
-              NFTAssetViewModel(
-                token: token,
-                network: networkAssets.network,
-                balance: Int(totalBalancesCache[token.assetBalanceId] ?? 0),
-                nftMetadata: metadataCache[token.id]
-              )
-            )
-          } else {
-            updatedUserVisibleAssets.append(
-              AssetViewModel(
-                token: token,
-                network: networkAssets.network,
-                decimalBalance: totalBalancesCache[token.assetBalanceId] ?? 0,
-                price: pricesCache[token.assetRatioId.lowercased()] ?? "",
-                history: priceHistoriesCache[token.assetRatioId.lowercased()] ?? []
-              )
-            )
-          }
-        }
-      }
+      updatedUserVisibleAssets = buildAssetViewModels(allVisibleUserAssets: allVisibleUserAssets)
       self.userVisibleAssets = updatedUserVisibleAssets
-      self.userVisibleNFTs = updatedUserVisibleNFTs
+        .sorted(by: AssetViewModel.sortedByValue(lhs:rhs:))
       
       // Compute balance based on current prices
       let currentBalance = userVisibleAssets
@@ -321,6 +245,21 @@ public class PortfolioStore: ObservableObject {
         )
       }
       isLoadingBalances = false
+    }
+  }
+  
+  /// Builds the `AssetViewModel`s and `NFTAssetViewModel`s using the balances, price and metadata stored in their respective caches.
+  private func buildAssetViewModels(allVisibleUserAssets: [NetworkAssets]) -> [AssetViewModel] {
+    allVisibleUserAssets.flatMap { networkAssets in
+      networkAssets.tokens.filter { (!$0.isErc721 && !$0.isNft) }.map { token in
+        AssetViewModel(
+          token: token,
+          network: networkAssets.network,
+          decimalBalance: totalBalancesCache[token.assetBalanceId] ?? 0,
+          price: pricesCache[token.assetRatioId.lowercased()] ?? "",
+          history: priceHistoriesCache[token.assetRatioId.lowercased()] ?? []
+        )
+      }
     }
   }
   
@@ -353,13 +292,6 @@ public class PortfolioStore: ObservableObject {
     }
     return priceHistories
   }
-  
-  func updateERC721MetadataCache(for token: BraveWallet.BlockchainToken, metadata: NFTMetadata) {
-    metadataCache[token.id] = metadata
-    if let index = userVisibleNFTs.firstIndex(where: { $0.token.id == token.id }), let viewModel = userVisibleNFTs[safe: index] {
-      userVisibleNFTs[index] = NFTAssetViewModel(token: viewModel.token, network: viewModel.network, balance: viewModel.balance, nftMetadata: metadata)
-    }
-  }
 }
 
 extension PortfolioStore: BraveWalletJsonRpcServiceObserver {
@@ -369,7 +301,7 @@ extension PortfolioStore: BraveWalletJsonRpcServiceObserver {
   public func onAddEthereumChainRequestCompleted(_ chainId: String, error: String) {
   }
 
-  public func chainChangedEvent(_ chainId: String, coin: BraveWallet.CoinType) {
+  public func chainChangedEvent(_ chainId: String, coin: BraveWallet.CoinType, origin: URLOrigin?) {
     update()
   }
 }
@@ -402,7 +334,7 @@ extension PortfolioStore: BraveWalletKeyringServiceObserver {
     }
   }
   
-  public func accountsAdded(_ coin: BraveWallet.CoinType, addresses: [String]) {
+  public func accountsAdded(_ addedAccounts: [BraveWallet.AccountInfo]) {
   }
 }
 
@@ -421,6 +353,14 @@ extension PortfolioStore: BraveWalletBraveWalletServiceObserver {
   }
 
   public func onNetworkListChanged() {
+    Task { @MainActor in
+      // A network was added or removed, update our network filters for the change.
+      self.networkFilters = await self.rpcService.allNetworksForSupportedCoins().map { network in
+        let defaultValue = !WalletConstants.supportedTestNetworkChainIds.contains(network.chainId)
+        let existingSelectionValue = self.networkFilters.first(where: { $0.model.chainId == network.chainId})?.isSelected
+        return .init(isSelected: existingSelectionValue ?? defaultValue, model: network)
+      }
+    }
   }
   
   public func onDefaultEthereumWalletChanged(_ wallet: BraveWallet.DefaultWallet) {
@@ -429,10 +369,15 @@ extension PortfolioStore: BraveWalletBraveWalletServiceObserver {
   public func onDefaultSolanaWalletChanged(_ wallet: BraveWallet.DefaultWallet) {
   }
   
+  public func onDiscoverAssetsStarted() {
+    isLoadingDiscoverAssets = true
+  }
+  
   public func onDiscoverAssetsCompleted(_ discoveredAssets: [BraveWallet.BlockchainToken]) {
     isLoadingDiscoverAssets = false
-    if !discoveredAssets.isEmpty {
-      update()
-    }
+    // assets update will be called via `CryptoStore`
+  }
+  
+  public func onResetWallet() {
   }
 }

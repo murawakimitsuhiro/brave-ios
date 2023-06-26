@@ -17,6 +17,8 @@ public class SendTokenStore: ObservableObject {
   @Published var selectedSendToken: BraveWallet.BlockchainToken? {
     didSet {
       update() // need to update `selectedSendTokenBalance` and `selectedSendNFTMetadata`
+      // Unstoppable Domains are resolved based on currently selected token.
+      validateSendAddress()
     }
   }
   /// The current selected NFT metadata. Default with nil value.
@@ -75,6 +77,7 @@ public class SendTokenStore: ObservableObject {
     case notSolAddress
     case snsError(domain: String)
     case ensError(domain: String)
+    case udError(domain: String)
 
     var errorDescription: String? {
       switch self {
@@ -94,6 +97,17 @@ public class SendTokenStore: ObservableObject {
         return String.localizedStringWithFormat(Strings.Wallet.sendErrorDomainNotRegistered, BraveWallet.CoinType.sol.localizedTitle)
       case .ensError:
         return String.localizedStringWithFormat(Strings.Wallet.sendErrorDomainNotRegistered, BraveWallet.CoinType.eth.localizedTitle)
+      case .udError:
+        return String.localizedStringWithFormat(Strings.Wallet.sendErrorDomainNotRegistered, BraveWallet.CoinType.eth.localizedTitle)
+      }
+    }
+    
+    var shouldBlockSend: Bool {
+      switch self {
+      case .missingChecksum:
+        return false
+      default:
+        return true
       }
     }
   }
@@ -107,12 +121,25 @@ public class SendTokenStore: ObservableObject {
       }
     }
   }
+  
+  private(set) lazy var selectTokenStore = SelectAccountTokenStore(
+    didSelect: { [weak self] account, token in
+      self?.didSelect(account: account, token: token)
+    },
+    keyringService: keyringService,
+    rpcService: rpcService,
+    walletService: walletService,
+    assetRatioService: assetRatioService,
+    ipfsApi: ipfsApi,
+    userAssetManager: assetManager
+  )
 
   private let keyringService: BraveWalletKeyringService
   private let rpcService: BraveWalletJsonRpcService
   private let walletService: BraveWalletBraveWalletService
   private let txService: BraveWalletTxService
   private let blockchainRegistry: BraveWalletBlockchainRegistry
+  private let assetRatioService: BraveWalletAssetRatioService
   private let ethTxManagerProxy: BraveWalletEthTxManagerProxy
   private let solTxManagerProxy: BraveWalletSolanaTxManagerProxy
   private var allTokens: [BraveWallet.BlockchainToken] = []
@@ -120,7 +147,8 @@ public class SendTokenStore: ObservableObject {
   private var sendAmountUpdatedTimer: Timer?
   private var prefilledToken: BraveWallet.BlockchainToken?
   private var metadataCache: [String: NFTMetadata] = [:]
-  private let ipfsApi: IpfsAPI?
+  private let ipfsApi: IpfsAPI
+  private let assetManager: WalletUserAssetManagerType
 
   public init(
     keyringService: BraveWalletKeyringService,
@@ -128,20 +156,24 @@ public class SendTokenStore: ObservableObject {
     walletService: BraveWalletBraveWalletService,
     txService: BraveWalletTxService,
     blockchainRegistry: BraveWalletBlockchainRegistry,
+    assetRatioService: BraveWalletAssetRatioService,
     ethTxManagerProxy: BraveWalletEthTxManagerProxy,
     solTxManagerProxy: BraveWalletSolanaTxManagerProxy,
     prefilledToken: BraveWallet.BlockchainToken?,
-    ipfsApi: IpfsAPI?
+    ipfsApi: IpfsAPI,
+    userAssetManager: WalletUserAssetManagerType
   ) {
     self.keyringService = keyringService
     self.rpcService = rpcService
     self.walletService = walletService
     self.txService = txService
     self.blockchainRegistry = blockchainRegistry
+    self.assetRatioService = assetRatioService
     self.ethTxManagerProxy = ethTxManagerProxy
     self.solTxManagerProxy = solTxManagerProxy
     self.prefilledToken = prefilledToken
     self.ipfsApi = ipfsApi
+    self.assetManager = userAssetManager
 
     self.keyringService.add(self)
     self.rpcService.add(self)
@@ -155,6 +187,25 @@ public class SendTokenStore: ObservableObject {
       rounded = false
     }
     sendAmount = ((selectedSendTokenBalance ?? 0) * amount.rawValue).decimalExpansion(precisionAfterDecimalPoint: decimalPoint, rounded: rounded)
+  }
+  
+  func didSelect(account: BraveWallet.AccountInfo, token: BraveWallet.BlockchainToken) {
+    Task { @MainActor in
+      let selectedCoin = await walletService.selectedCoin()
+      
+      let selectedAccount = await self.keyringService.selectedAccount(selectedCoin)
+      if selectedAccount != account.address {
+        _ = await self.keyringService.setSelectedAccount(account.coin, keyringId: account.keyringId, address: account.address)
+      }
+      
+      let selectedChain = await rpcService.network(selectedCoin, origin: nil)
+      if self.selectedSendToken != token || selectedChain.chainId != token.chainId {
+        _ = await self.rpcService.setNetwork(token.chainId, coin: token.coin, origin: nil)
+        self.prefilledToken = token
+      }
+      
+      self.update()
+    }
   }
   
   @MainActor private func validatePrefilledToken(on network: inout BraveWallet.NetworkInfo) async {
@@ -171,7 +222,7 @@ public class SendTokenStore: ObservableObject {
         // don't set prefilled token if it belongs to a network we don't know
         return
       }
-      let success = await rpcService.setNetwork(networkForToken.chainId, coin: networkForToken.coin)
+      let success = await rpcService.setNetwork(networkForToken.chainId, coin: networkForToken.coin, origin: nil)
       if success {
         self.selectedSendToken = prefilledToken
       }
@@ -188,11 +239,11 @@ public class SendTokenStore: ObservableObject {
       self.isLoading = true
       defer { self.isLoading = false }
       var coin = await self.walletService.selectedCoin()
-      var network = await self.rpcService.network(coin)
+      var network = await self.rpcService.network(coin, origin: nil)
       await validatePrefilledToken(on: &network) // network may change
       coin = network.coin // in case network changed
       // fetch user assets
-      let userAssets = await self.walletService.userAssets(network.chainId, coin: network.coin)
+      let userAssets = assetManager.getAllUserAssetsInNetworkAssets(networks: [network]).flatMap { $0.tokens }
       let allTokens = await self.blockchainRegistry.allTokens(network.chainId, coin: network.coin)
       guard !Task.isCancelled else { return }
       if selectedSendToken == nil {
@@ -252,7 +303,7 @@ public class SendTokenStore: ObservableObject {
         await validateEthereumSendAddress(fromAddress: sendFromAddress)
       case .sol:
         await validateSolanaSendAddress(fromAddress: sendFromAddress)
-      case .fil:
+      case .fil, .btc:
         break
       @unknown default:
         break
@@ -264,6 +315,7 @@ public class SendTokenStore: ObservableObject {
     let normalizedFromAddress = fromAddress.lowercased()
     let normalizedToAddress = sendAddress.lowercased()
     let isSupportedENSExtension = sendAddress.endsWithSupportedENSExtension
+    let isSupportedUDExtension = sendAddress.endsWithSupportedUDExtension
     if isSupportedENSExtension {
       self.resolvedAddress = nil
       self.isResolvingAddress = true
@@ -292,6 +344,8 @@ public class SendTokenStore: ObservableObject {
       // store address for sending
       resolvedAddress = address
       addressError = nil
+    } else if isSupportedUDExtension {
+      await resolveUnstoppableDomain(sendAddress)
     } else {
       if !sendAddress.isETHAddress {
         // 1. check if send address is a valid eth address
@@ -320,6 +374,31 @@ public class SendTokenStore: ObservableObject {
     }
   }
   
+  @MainActor private func resolveUnstoppableDomain(_ domain: String) async {
+    guard selectedSendToken != nil else {
+      // token is required for `unstoppableDomainsGetWalletAddr`
+      // else it returns `invalidParams` error immediately
+      return
+    }
+    self.resolvedAddress = nil
+    self.isResolvingAddress = true
+    defer { self.isResolvingAddress = false }
+    let token = selectedSendToken
+    let (address, status, _) = await rpcService.unstoppableDomainsGetWalletAddr(domain, token: token)
+    guard !Task.isCancelled else { return }
+    if status != .success || address.isEmpty {
+      addressError = .udError(domain: sendAddress)
+      return
+    }
+    guard domain == sendAddress, token == selectedSendToken, !Task.isCancelled else {
+      // address changed while resolving, or validation cancelled.
+      return
+    }
+    // store address for sending
+    resolvedAddress = address
+    addressError = nil
+  }
+  
   public func enableENSOffchainLookup() {
     Task { @MainActor in
       rpcService.setEnsOffchainLookupResolveMethod(.enabled)
@@ -332,6 +411,7 @@ public class SendTokenStore: ObservableObject {
     let normalizedFromAddress = fromAddress.lowercased()
     let normalizedToAddress = sendAddress.lowercased()
     let isSupportedSNSExtension = sendAddress.endsWithSupportedSNSExtension
+    let isSupportedUDExtension = sendAddress.endsWithSupportedUDExtension
     if isSupportedSNSExtension {
       self.resolvedAddress = nil
       self.isResolvingAddress = true
@@ -355,6 +435,8 @@ public class SendTokenStore: ObservableObject {
       // store address for sending
       resolvedAddress = address
       addressError = nil
+    } else if isSupportedUDExtension {
+      await resolveUnstoppableDomain(sendAddress)
     } else { // not supported SNS extension, validate address
       let isValid = await walletService.isBase58EncodedSolanaPubkey(sendAddress)
       if !isValid {
@@ -422,7 +504,7 @@ public class SendTokenStore: ObservableObject {
     let sendToAddress = resolvedAddress ?? sendAddress
 
     isMakingTx = true
-    rpcService.network(.eth) { [weak self] network in
+    rpcService.network(.eth, origin: nil) { [weak self] network in
       guard let self = self else { return }
       if network.isNativeAsset(token) {
         let baseData = BraveWallet.TxData(nonce: "", gasPrice: "", gasLimit: "", to: sendToAddress, value: "0x\(weiHexString)", data: .init(), signOnly: false, signedTransaction: nil)
@@ -488,7 +570,7 @@ public class SendTokenStore: ObservableObject {
     
     let sendToAddress = resolvedAddress ?? sendAddress
 
-    rpcService.network(.sol) { [weak self] network in
+    rpcService.network(.sol, origin: nil) { [weak self] network in
       guard let self = self else { return }
       if network.isNativeAsset(token) {
         self.solTxManagerProxy.makeSystemProgramTransferTxData(
@@ -507,7 +589,8 @@ public class SendTokenStore: ObservableObject {
         }
       } else {
         self.solTxManagerProxy.makeTokenProgramTransferTxData(
-          token.contractAddress,
+          network.chainId,
+          splTokenMintAddress: token.contractAddress,
           fromWalletAddress: fromAddress,
           toWalletAddress: sendToAddress,
           amount: amount
@@ -562,12 +645,12 @@ extension SendTokenStore: BraveWalletKeyringServiceObserver {
     validateSendAddress() // `sendAddress` may equal selected account address
   }
   
-  public func accountsAdded(_ coin: BraveWallet.CoinType, addresses: [String]) {
+  public func accountsAdded(_ addedAccounts: [BraveWallet.AccountInfo]) {
   }
 }
 
 extension SendTokenStore: BraveWalletJsonRpcServiceObserver {
-  public func chainChangedEvent(_ chainId: String, coin: BraveWallet.CoinType) {
+  public func chainChangedEvent(_ chainId: String, coin: BraveWallet.CoinType, origin: URLOrigin?) {
     selectedSendToken = nil
     selectedSendTokenBalance = nil
     if coin != .eth { // if changed to ethereum coin network, address is still valid

@@ -7,7 +7,7 @@ import Foundation
 import BraveCore
 import OrderedCollections
 
-struct WalletConstants {
+public struct WalletConstants {
   /// The Brave swap fee as a % value for 0x DEX aggregator
   ///
   /// This value will be formatted to a string such as 0.875%)
@@ -26,14 +26,32 @@ struct WalletConstants {
   /// The url to Brave Help Center for Wallet.
   static let braveWalletSupportURL = URL(string: "https://support.brave.com/hc/en-us/categories/360001059151-Brave-Wallet")!
   
+  /// Terms of Use for Solana Name Service (SNS)
+  public static let snsTermsOfUseURL: URL = URL(string: "https://syndica.io/terms-and-conditions/")!
+  
+  /// Privacy Policy for Solana Name Service (SNS)
+  public static let snsPrivacyPolicyURL: URL = URL(string: "https://syndica.io/privacy-policy/")!
+  
+  /// Terms of Use for Ethereum Name Service (ENS)
+  public static let ensTermsOfUseURL: URL = URL(string: "https://consensys.net/terms-of-use/")!
+  
+  /// Privacy Policy for Ethereum Name Service (ENS)
+  public static let ensPrivacyPolicyURL: URL = URL(string: "https://consensys.net/privacy-policy/")!
+  
   /// The url to learn more about ENS off-chain lookups
-  static let braveWalletENSOffchainURL = URL(string: "https://github.com/brave/brave-browser/wiki/ENS-offchain-lookup")!
+  public static let braveWalletENSOffchainURL = URL(string: "https://github.com/brave/brave-browser/wiki/ENS-offchain-lookup")!
+  
+  /// The url to learn more about Unstoppable Domains resolve methods.
+  public static let braveWalletUnstoppableDomainsURL = URL(string: "https://github.com/brave/brave-browser/wiki/Resolve-Methods-for-Unstoppable-Domains")!
   
   /// The url to the privacy policy for 0x swaps
   static let zeroXPrivacyPolicy = URL(string: "https://www.0x.org/privacy")!
   
   /// The url to the privacy policy for Jupiter swaps
   static let jupiterPrivacyPolicy = URL(string: "https://docs.jup.ag/legal/privacy-policy")!
+  
+  /// The url to learn more about NFT Discovery
+  public static let nftDiscoveryURL = URL(string: "https://github.com/brave/brave-browser/wiki/NFT-Discovery")!
 
   /// The currently supported test networks.
   static let supportedTestNetworkChainIds = [
@@ -42,7 +60,8 @@ struct WalletConstants {
     BraveWallet.LocalhostChainId,
     BraveWallet.SolanaDevnet,
     BraveWallet.SolanaTestnet,
-    BraveWallet.FilecoinTestnet
+    BraveWallet.FilecoinTestnet,
+    BraveWallet.FilecoinEthereumTestnetChainId
   ]
   
   /// Primary network chain ids
@@ -61,6 +80,11 @@ struct WalletConstants {
   static let supportedENSExtensions = [".eth"]
   /// The supported Solana Name Service (SNS) extensions
   static let supportedSNSExtensions = [".sol"]
+  /// The supported Unstoppable Domain (UD) extensions
+  public static let supportedUDExtensions = [".crypto", ".x", ".nft", ".dao", ".wallet", ".blockchain", ".bitcoin", ".zil"]
+  
+  /// The supported IPFS schemes
+  static let supportedIPFSSchemes = ["ipfs", "ipns"]
   
   /// The link for users to learn more about Solana SPL token account creation in transaction confirmation screen
   static let splTokenAccountCreationLink = URL(string: "https://support.brave.com/hc/en-us/articles/5546517853325")!
@@ -107,4 +131,7 @@ struct WalletConstants {
   
   /// The link for for users to learn more about sign transactions
   static let signTransactionRiskLink: URL = URL(string: "https://support.brave.com/hc/en-us/articles/4409513799693")!
+  
+  /// The link for for users to learn more about IPFS
+  public static let ipfsLearnMoreLink: URL = URL(string: "https://support.brave.com/hc/en-us/articles/360051406452-How-does-IPFS-Impact-my-Privacy-")!
 }

@@ -69,7 +69,7 @@ struct AccountActivityView: View {
                 image: AssetIconView(
                   token: asset.token,
                   network: asset.network,
-                  shouldShowNativeTokenIcon: true
+                  shouldShowNetworkIcon: true
                 ),
                 title: asset.token.name,
                 symbol: asset.token.symbol,
@@ -86,12 +86,12 @@ struct AccountActivityView: View {
         Section(content: {
           Group {
             ForEach(activityStore.userVisibleNFTs) { nftAsset in
-              PortfolioNFTAssetView(
+              NFTAssetView(
                 image: NFTIconView(
                   token: nftAsset.token,
                   network: nftAsset.network,
                   url: nftAsset.nftMetadata?.imageURL,
-                  shouldShowNativeTokenIcon: true
+                  shouldShowNetworkIcon: true
                 ),
                 title: nftAsset.token.nftTokenTitle,
                 symbol: nftAsset.token.symbol,
@@ -121,7 +121,8 @@ struct AccountActivityView: View {
               .contextMenu {
                 if !txSummary.txHash.isEmpty {
                   Button(action: {
-                    if let baseURL = self.networkStore.selectedChain.blockExplorerUrls.first.map(URL.init(string:)),
+                    if let txNetwork = self.networkStore.allChains.first(where: { $0.chainId == txSummary.txInfo.chainId }),
+                       let baseURL = txNetwork.blockExplorerUrls.first.map(URL.init(string:)),
                        let url = baseURL?.appendingPathComponent("tx/\(txSummary.txHash)") {
                       openWalletURL(url)
                     }
@@ -199,7 +200,7 @@ private struct AccountActivityHeaderView: View {
       HStack {
         Button(action: { action(false) }) {
           HStack {
-            Image(braveSystemName: "brave.qr-code")
+            Image(braveSystemName: "leo.qr.code")
               .font(.body)
             Text(Strings.Wallet.detailsButtonTitle)
               .font(.footnote.weight(.bold))
@@ -207,7 +208,7 @@ private struct AccountActivityHeaderView: View {
         }
         Button(action: { action(true) }) {
           HStack {
-            Image(braveSystemName: "brave.edit")
+            Image(braveSystemName: "leo.edit.pencil")
               .font(.body)
             Text(Strings.Wallet.renameButtonTitle)
               .font(.footnote.weight(.bold))

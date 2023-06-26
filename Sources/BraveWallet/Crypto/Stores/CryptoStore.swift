@@ -5,6 +5,8 @@
 
 import BraveCore
 import Combine
+import Preferences
+import Data
 
 enum PendingRequest: Equatable {
   case transactions([BraveWallet.TransactionInfo])
@@ -37,7 +39,7 @@ extension PendingRequest: Identifiable {
 enum WebpageRequestResponse: Equatable {
   case switchChain(approved: Bool, originInfo: BraveWallet.OriginInfo)
   case addNetwork(approved: Bool, chainId: String)
-  case addSuggestedToken(approved: Bool, contractAddresses: [String])
+  case addSuggestedToken(approved: Bool, token: BraveWallet.BlockchainToken)
   case signMessage(approved: Bool, id: Int32)
   case getEncryptionPublicKey(approved: Bool, originInfo: BraveWallet.OriginInfo)
   case decrypt(approved: Bool, originInfo: BraveWallet.OriginInfo)
@@ -48,6 +50,9 @@ enum WebpageRequestResponse: Equatable {
 public class CryptoStore: ObservableObject {
   public let networkStore: NetworkStore
   public let portfolioStore: PortfolioStore
+  let nftStore: NFTStore
+  let transactionsActivityStore: TransactionsActivityStore
+  let marketStore: MarketStore
   
   @Published var buySendSwapDestination: BuySendSwapDestination? {
     didSet {
@@ -80,6 +85,12 @@ public class CryptoStore: ObservableObject {
       }
     }
   }
+  /// The origin of the active tab (if applicable). Used for fetching/selecting network for the DApp origin.
+  public var origin: URLOrigin? {
+    didSet {
+      networkStore.origin = origin
+    }
+  }
   
   private let keyringService: BraveWalletKeyringService
   private let rpcService: BraveWalletJsonRpcService
@@ -90,7 +101,8 @@ public class CryptoStore: ObservableObject {
   private let txService: BraveWalletTxService
   private let ethTxManagerProxy: BraveWalletEthTxManagerProxy
   private let solTxManagerProxy: BraveWalletSolanaTxManagerProxy
-  private let ipfsApi: IpfsAPI?
+  private let ipfsApi: IpfsAPI
+  private let userAssetManager: WalletUserAssetManager
   
   public init(
     keyringService: BraveWalletKeyringService,
@@ -102,7 +114,8 @@ public class CryptoStore: ObservableObject {
     txService: BraveWalletTxService,
     ethTxManagerProxy: BraveWalletEthTxManagerProxy,
     solTxManagerProxy: BraveWalletSolanaTxManagerProxy,
-    ipfsApi: IpfsAPI?
+    ipfsApi: IpfsAPI,
+    origin: URLOrigin? = nil
   ) {
     self.keyringService = keyringService
     self.rpcService = rpcService
@@ -114,12 +127,16 @@ public class CryptoStore: ObservableObject {
     self.ethTxManagerProxy = ethTxManagerProxy
     self.solTxManagerProxy = solTxManagerProxy
     self.ipfsApi = ipfsApi
+    self.userAssetManager = WalletUserAssetManager(rpcService: rpcService, walletService: walletService)
+    self.origin = origin
     
     self.networkStore = .init(
       keyringService: keyringService,
       rpcService: rpcService,
       walletService: walletService,
-      swapService: swapService
+      swapService: swapService,
+      userAssetManager: userAssetManager,
+      origin: origin
     )
     self.portfolioStore = .init(
       keyringService: keyringService,
@@ -127,12 +144,43 @@ public class CryptoStore: ObservableObject {
       walletService: walletService,
       assetRatioService: assetRatioService,
       blockchainRegistry: blockchainRegistry,
-      ipfsApi: ipfsApi
+      ipfsApi: ipfsApi,
+      userAssetManager: userAssetManager
+    )
+    self.nftStore = .init(
+      keyringService: keyringService,
+      rpcService: rpcService,
+      walletService: walletService,
+      assetRatioService: assetRatioService,
+      blockchainRegistry: blockchainRegistry,
+      ipfsApi: ipfsApi,
+      userAssetManager: userAssetManager
+    )
+    self.transactionsActivityStore = .init(
+      keyringService: keyringService,
+      rpcService: rpcService,
+      walletService: walletService,
+      assetRatioService: assetRatioService,
+      blockchainRegistry: blockchainRegistry,
+      txService: txService,
+      solTxManagerProxy: solTxManagerProxy,
+      userAssetManager: userAssetManager
+    )
+    self.marketStore = .init(
+      assetRatioService: assetRatioService,
+      blockchainRegistry: blockchainRegistry,
+      rpcService: rpcService,
+      walletService: walletService
     )
     
     self.keyringService.add(self)
     self.txService.add(self)
     self.rpcService.add(self)
+    self.walletService.add(self)
+    
+    userAssetManager.migrateUserAssets { [weak self] in
+      self?.updateAssets()
+    }
   }
   
   private var buyTokenStore: BuyTokenStore?
@@ -162,10 +210,12 @@ public class CryptoStore: ObservableObject {
       walletService: walletService,
       txService: txService,
       blockchainRegistry: blockchainRegistry,
+      assetRatioService: assetRatioService,
       ethTxManagerProxy: ethTxManagerProxy,
       solTxManagerProxy: solTxManagerProxy,
       prefilledToken: prefilledToken,
-      ipfsApi: self.ipfsApi
+      ipfsApi: ipfsApi,
+      userAssetManager: userAssetManager
     )
     sendTokenStore = store
     return store
@@ -185,6 +235,7 @@ public class CryptoStore: ObservableObject {
       walletService: walletService,
       ethTxManagerProxy: ethTxManagerProxy,
       solTxManagerProxy: solTxManagerProxy,
+      userAssetManager: userAssetManager,
       prefilledToken: prefilledToken
     )
     swapTokenStore = store
@@ -192,8 +243,8 @@ public class CryptoStore: ObservableObject {
   }
   
   private var assetDetailStore: AssetDetailStore?
-  func assetDetailStore(for token: BraveWallet.BlockchainToken) -> AssetDetailStore {
-    if let store = assetDetailStore, store.token.id == token.id {
+  func assetDetailStore(for assetDetailType: AssetDetailType) -> AssetDetailStore {
+    if let store = assetDetailStore, store.assetDetailType.id == assetDetailType.id {
       return store
     }
     let store = AssetDetailStore(
@@ -205,14 +256,15 @@ public class CryptoStore: ObservableObject {
       blockchainRegistry: blockchainRegistry,
       solTxManagerProxy: solTxManagerProxy,
       swapService: swapService,
-      token: token
+      userAssetManager: userAssetManager,
+      assetDetailType: assetDetailType
     )
     assetDetailStore = store
     return store
   }
   
-  func closeAssetDetailStore(for token: BraveWallet.BlockchainToken) {
-    if let store = assetDetailStore, store.token.id == token.id {
+  func closeAssetDetailStore(for assetDetailType: AssetDetailType) {
+    if let store = assetDetailStore, store.assetDetailType.id == assetDetailType.id {
       assetDetailStore = nil
     }
   }
@@ -237,7 +289,8 @@ public class CryptoStore: ObservableObject {
       txService: txService,
       blockchainRegistry: blockchainRegistry,
       solTxManagerProxy: solTxManagerProxy,
-      ipfsApi: ipfsApi
+      ipfsApi: ipfsApi,
+      userAssetManager: userAssetManager
     )
     accountActivityStore = store
     return store
@@ -268,7 +321,8 @@ public class CryptoStore: ObservableObject {
       walletService: walletService,
       ethTxManagerProxy: ethTxManagerProxy,
       keyringService: keyringService,
-      solTxManagerProxy: solTxManagerProxy
+      solTxManagerProxy: solTxManagerProxy,
+      userAssetManager: userAssetManager
     )
     confirmationStore = store
     return store
@@ -278,7 +332,8 @@ public class CryptoStore: ObservableObject {
     keyringService: keyringService,
     walletService: walletService,
     rpcService: rpcService,
-    txService: txService
+    txService: txService,
+    ipfsApi: ipfsApi
   )
   
   private var nftDetailStore: NFTDetailStore?
@@ -302,10 +357,17 @@ public class CryptoStore: ObservableObject {
     }
   }
   
+  // This will be called when users exit from edit visible asset screen
+  // so that Portfolio and NFT tabs will update assets
+  func updateAssets() {
+    portfolioStore.update()
+    nftStore.update()
+  }
+  
   func prepare(isInitialOpen: Bool = false) {
     Task { @MainActor in
       if isInitialOpen {
-        portfolioStore.discoverAssetsOnAllSupportedChains()
+        walletService.discoverAssetsOnAllSupportedChains()
       }
       
       let pendingTransactions = await fetchPendingTransactions()
@@ -341,8 +403,12 @@ public class CryptoStore: ObservableObject {
   @MainActor
   func fetchPendingTransactions() async -> [BraveWallet.TransactionInfo] {
     let allKeyrings = await keyringService.keyrings(for: WalletConstants.supportedCoinTypes)
-
-    return await txService.pendingTransactions(for: allKeyrings)
+    var allChainIdsForCoin: [BraveWallet.CoinType: [String]] = [:]
+    for coin in WalletConstants.supportedCoinTypes {
+      let allNetworks = await rpcService.allNetworks(coin)
+      allChainIdsForCoin[coin] = allNetworks.map(\.chainId)
+    }
+    return await txService.pendingTransactions(chainIdsForCoin: allChainIdsForCoin, for: allKeyrings)
   }
 
   @MainActor
@@ -412,8 +478,13 @@ public class CryptoStore: ObservableObject {
         rpcService.addEthereumChainRequestCompleted(chainId, approved: approved)
       }
       return
-    case let .addSuggestedToken(approved, contractAddresses):
-      walletService.notifyAddSuggestTokenRequestsProcessed(approved, contractAddresses: contractAddresses)
+    case let .addSuggestedToken(approved, token):
+      if approved {
+        userAssetManager.addUserAsset(token) { [weak self] in
+          self?.updateAssets()
+        }
+      }
+      walletService.notifyAddSuggestTokenRequestsProcessed(approved, contractAddresses: [token.contractAddress])
     case let .signMessage(approved, id):
       walletService.notifySignMessageRequestProcessed(approved, id: id, signature: nil, error: nil)
     case let .getEncryptionPublicKey(approved, originInfo):
@@ -445,7 +516,7 @@ public class CryptoStore: ObservableObject {
       }
       let pendingAddSuggestedTokenRequets = await walletService.pendingAddSuggestTokenRequests()
       pendingAddSuggestedTokenRequets.forEach {
-        handleWebpageRequestResponse(.addSuggestedToken(approved: false, contractAddresses: [$0.token.contractAddress]))
+        handleWebpageRequestResponse(.addSuggestedToken(approved: false, token: $0.token))
       }
       let pendingGetEncryptionPublicKeyRequests = await walletService.pendingGetEncryptionPublicKeyRequests()
       pendingGetEncryptionPublicKeyRequests.forEach {
@@ -481,8 +552,22 @@ extension CryptoStore: BraveWalletKeyringServiceObserver {
     rejectAllPendingWebpageRequests()
   }
   public func keyringCreated(_ keyringId: String) {
+    Task { @MainActor [weak self] in
+      if let newCoin = WalletConstants.supportedCoinTypes.first(where: { $0.keyringId == keyringId }) {
+        self?.userAssetManager.migrateUserAssets(for: newCoin, completion: {
+          self?.updateAssets()
+        })
+      }
+    }
   }
   public func keyringRestored(_ keyringId: String) {
+    // if a keyring is restored, we want to reset user assets local storage
+    // and migrate with for new keyring
+    WalletUserAssetGroup.removeAllGroup() { [weak self] in
+      self?.userAssetManager.migrateUserAssets(completion: {
+        self?.updateAssets()
+      })
+    }
   }
   public func locked() {
     isPresentingPendingRequest = false
@@ -497,12 +582,12 @@ extension CryptoStore: BraveWalletKeyringServiceObserver {
   }
   public func selectedAccountChanged(_ coinType: BraveWallet.CoinType) {
   }
-  public func accountsAdded(_ coin: BraveWallet.CoinType, addresses: [String]) {
+  public func accountsAdded(_ addedAccounts: [BraveWallet.AccountInfo]) {
   }
 }
 
 extension CryptoStore: BraveWalletJsonRpcServiceObserver {
-  public func chainChangedEvent(_ chainId: String, coin: BraveWallet.CoinType) {
+  public func chainChangedEvent(_ chainId: String, coin: BraveWallet.CoinType, origin: URLOrigin?) {
     // if user had just changed networks, there is a potential race condition
     // blocking presenting pendingRequest here, as Network Selection might still be on screen
     // by delaying here instead of at present we only delay after chain changes (#6750)
@@ -512,12 +597,58 @@ extension CryptoStore: BraveWalletJsonRpcServiceObserver {
   }
   
   public func onAddEthereumChainRequestCompleted(_ chainId: String, error: String) {
-    if let addNetworkDappRequestCompletion = addNetworkDappRequestCompletion[chainId] {
-      addNetworkDappRequestCompletion(error.isEmpty ? nil : error)
-      self.addNetworkDappRequestCompletion[chainId] = nil
+    Task { @MainActor in
+      if let addNetworkDappRequestCompletion = addNetworkDappRequestCompletion[chainId] {
+        if error.isEmpty {
+          let allNetworks = await rpcService.allNetworks(.eth)
+          if let network = allNetworks.first(where: { $0.chainId == chainId }) {
+            userAssetManager.addUserAsset(network.nativeToken) { [weak self] in
+              self?.updateAssets()
+            }
+          }
+        }
+        addNetworkDappRequestCompletion(error.isEmpty ? nil : error)
+        self.addNetworkDappRequestCompletion[chainId] = nil
+      }
     }
   }
   
   public func onIsEip1559Changed(_ chainId: String, isEip1559: Bool) {
+  }
+}
+
+extension CryptoStore: BraveWalletBraveWalletServiceObserver {
+  public func onActiveOriginChanged(_ originInfo: BraveWallet.OriginInfo) {
+  }
+  
+  public func onDefaultEthereumWalletChanged(_ wallet: BraveWallet.DefaultWallet) {
+  }
+  
+  public func onDefaultSolanaWalletChanged(_ wallet: BraveWallet.DefaultWallet) {
+  }
+  
+  public func onDefaultBaseCurrencyChanged(_ currency: String) {
+  }
+  
+  public func onDefaultBaseCryptocurrencyChanged(_ cryptocurrency: String) {
+  }
+  
+  public func onNetworkListChanged() {
+    updateAssets()
+  }
+  
+  public func onDiscoverAssetsStarted() {
+  }
+  
+  public func onDiscoverAssetsCompleted(_ discoveredAssets: [BraveWallet.BlockchainToken]) {
+    for asset in discoveredAssets where userAssetManager.getUserAsset(asset) == nil {
+      userAssetManager.addUserAsset(asset, completion: nil)
+    }
+    if !discoveredAssets.isEmpty {
+      updateAssets()
+    }
+  }
+  
+  public func onResetWallet() {
   }
 }

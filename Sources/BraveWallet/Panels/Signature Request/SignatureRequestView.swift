@@ -4,15 +4,15 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import SwiftUI
-import Strings
+import BraveStrings
 import BraveCore
-import BraveShared
 import DesignSystem
 
 struct SignatureRequestView: View {
   var requests: [BraveWallet.SignMessageRequest]
   @ObservedObject var keyringStore: KeyringStore
   var cryptoStore: CryptoStore
+  @ObservedObject var networkStore: NetworkStore
   
   var onDismiss: () -> Void
 
@@ -35,6 +35,10 @@ struct SignatureRequestView: View {
   
   private var account: BraveWallet.AccountInfo {
     keyringStore.allAccounts.first(where: { $0.address == currentRequest.address }) ?? keyringStore.selectedAccount
+  }
+  
+  private var network: BraveWallet.NetworkInfo? {
+    networkStore.allChains.first(where: { $0.chainId == currentRequest.chainId })
   }
   
   /// Request display text, used as fallback.
@@ -111,8 +115,8 @@ struct SignatureRequestView: View {
       var result = currentRequest.message
       if needPilcrowFormatted[requestIndex] == true {
         var copy = currentRequest.message
-        while copy.range(of: "\\n{2,}", options: .regularExpression) != nil {
-          if let range = copy.range(of: "\\n{2,}", options: .regularExpression) {
+        while copy.range(of: "\\n{3,}", options: .regularExpression) != nil {
+          if let range = copy.range(of: "\\n{3,}", options: .regularExpression) {
             let newlines = String(copy[range])
             result.replaceSubrange(range, with: "\n\(uuid.uuidString) <\(newlines.count)>\n")
             copy.replaceSubrange(range, with: "\n\(uuid.uuidString) <\(newlines.count)>\n")
@@ -131,21 +135,28 @@ struct SignatureRequestView: View {
     requests: [BraveWallet.SignMessageRequest],
     keyringStore: KeyringStore,
     cryptoStore: CryptoStore,
+    networkStore: NetworkStore,
     onDismiss: @escaping () -> Void
   ) {
     assert(!requests.isEmpty)
     self.requests = requests
     self.keyringStore = keyringStore
     self.cryptoStore = cryptoStore
+    self.networkStore = networkStore
     self.onDismiss = onDismiss
   }
   
   var body: some View {
     ScrollView(.vertical) {
       VStack {
-        if requests.count > 1 {
-          HStack {
-            Spacer()
+        HStack {
+          if let network {
+            Text(network.chainName)
+              .font(.callout)
+              .foregroundColor(Color(.braveLabel))
+          }
+          Spacer()
+          if requests.count > 1 {
             Text(String.localizedStringWithFormat(Strings.Wallet.transactionCount, requestIndex + 1, requests.count))
               .fontWeight(.semibold)
             Button(action: next) {
@@ -309,7 +320,7 @@ struct SignatureRequestView: View {
         onDismiss()
       }
     }) {
-      Label(Strings.Wallet.sign, braveSystemImage: "brave.key")
+      Label(Strings.Wallet.sign, braveSystemImage: "leo.key")
         .imageScale(.large)
     }
     .buttonStyle(BraveFilledButtonStyle(size: .large))
@@ -361,7 +372,7 @@ extension String {
   
   var hasConsecutiveNewLines: Bool {
     // return true if string has two or more consecutive newline chars
-    return range(of: "\\n{2,}", options: .regularExpression) != nil
+    return range(of: "\\n{3,}", options: .regularExpression) != nil
   }
   
   var printableWithUnknownUnicode: String {
@@ -389,6 +400,7 @@ struct SignatureRequestView_Previews: PreviewProvider {
       requests: [.previewRequest],
       keyringStore: .previewStoreWithWalletCreated,
       cryptoStore: .previewStore,
+      networkStore: .previewStore,
       onDismiss: { }
     )
   }

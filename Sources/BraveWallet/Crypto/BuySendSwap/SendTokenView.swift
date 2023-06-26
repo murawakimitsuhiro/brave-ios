@@ -7,6 +7,7 @@ import SwiftUI
 import Strings
 import DesignSystem
 import BigNumber
+import BraveUI
 
 struct SendTokenView: View {
   @ObservedObject var keyringStore: KeyringStore
@@ -15,6 +16,7 @@ struct SendTokenView: View {
 
   @State private var isShowingScanner = false
   @State private var isShowingError = false
+  @State private var isShowingSelectAccountTokenView: Bool = false
 
   @ScaledMetric private var length: CGFloat = 16.0
   
@@ -30,7 +32,7 @@ struct SendTokenView: View {
           !sendTokenStore.isMakingTx,
           !sendTokenStore.sendAddress.isEmpty,
           !sendTokenStore.isResolvingAddress,
-          sendTokenStore.addressError == nil,
+          sendTokenStore.addressError?.shouldBlockSend != true,
           sendTokenStore.sendError == nil else {
       return true
     }
@@ -65,46 +67,57 @@ struct SendTokenView: View {
   var body: some View {
     NavigationView {
       Form {
-        Section {
-          AccountPicker(
-            keyringStore: keyringStore,
-            networkStore: networkStore
-          )
-          .listRowBackground(Color(UIColor.braveGroupedBackground))
-          .resetListHeaderStyle()
-        }
         Section(
-          header: WalletListHeaderView(title: Text(Strings.Wallet.sendCryptoFromTitle))
-        ) {
-          NavigationLink(
-            destination:
-              SendTokenSearchView(
-                sendTokenStore: sendTokenStore,
-                network: networkStore.selectedChain
+          header: WalletListHeaderView {
+            HStack {
+              Text("\(Strings.Wallet.sendCryptoFromTitle): \(keyringStore.selectedAccount.name) (\(keyringStore.selectedAccount.address.truncatedAddress))")
+              Spacer()
+              Menu(
+                content: {
+                  Text(keyringStore.selectedAccount.address.zwspOutput)
+                  Button(action: {
+                    UIPasteboard.general.string = keyringStore.selectedAccount.address
+                  }) {
+                    Label(Strings.Wallet.copyAddressButtonTitle, braveSystemImage: "leo.copy.plain-text")
+                  }
+                },
+                label: {
+                  Image(braveSystemName: "leo.more.horizontal")
+                    .padding(6)
+                    .clipShape(Rectangle())
+                }
               )
-          ) {
+            }
+          }
+        ) {
+          Button(action: { self.isShowingSelectAccountTokenView = true }) {
             HStack {
               if let token = sendTokenStore.selectedSendToken {
                 if token.isErc721 || token.isNft {
                   NFTIconView(
                     token: token,
-                    network: networkStore.selectedChain,
+                    network: networkStore.defaultSelectedChain,
                     url: sendTokenStore.selectedSendNFTMetadata?.imageURL,
                     length: 26
                   )
                 } else {
                   AssetIconView(
                     token: token,
-                    network: networkStore.selectedChain,
+                    network: networkStore.defaultSelectedChain,
                     length: 26
                   )
                 }
               }
-              Text(sendTokenStore.selectedSendToken?.symbol ?? "")
-                .font(.title3.weight(.semibold))
-                .foregroundColor(Color(.braveLabel))
+              VStack(alignment: .leading) {
+                Text(sendTokenStore.selectedSendToken?.symbol ?? "")
+                  .font(.title3.weight(.semibold))
+                  .foregroundColor(Color(.braveLabel))
+                Text(networkStore.defaultSelectedChain.chainName)
+                  .font(.caption)
+                  .foregroundColor(Color(.secondaryBraveLabel))
+              }
               Spacer()
-              Text(sendTokenStore.selectedSendTokenBalance?.decimalDescription ?? "0.0000")
+              Text("\(sendTokenStore.selectedSendTokenBalance?.decimalDescription.trimmingTrailingZeros ?? "0") \(sendTokenStore.selectedSendToken?.symbol ?? "")")
                 .font(.title3.weight(.semibold))
                 .foregroundColor(Color(.braveLabel))
             }
@@ -140,33 +153,10 @@ struct SendTokenView: View {
         }
         Section(
           header: WalletListHeaderView(title: Text(Strings.Wallet.sendCryptoToTitle)),
-          footer: Group {
-            if let error = sendTokenStore.addressError {
-              HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Image(systemName: "exclamationmark.circle.fill")
-                Text(error.localizedDescription)
-                  .fixedSize(horizontal: false, vertical: true)
-                  .animation(nil, value: error.localizedDescription)
-              }
-              .transition(
-                .asymmetric(
-                  insertion: .opacity.animation(.default),
-                  removal: .identity
-                )
-              )
-              .font(.footnote)
-              .foregroundColor(Color(.braveErrorLabel))
-              .padding(.bottom)
-            } else {
-              // SwiftUI will add/remove this Section footer when addressError
-              // optionality is changed. This can cause keyboard to dismiss.
-              // By using clear square, the footer remains and section is not
-              // redrawn, so the keyboard does not dismiss as user types.
-              Color.clear.frame(width: 1, height: 1)
-                .accessibility(hidden: true)
-                .transition(.identity)
-            }
-          }
+          footer:
+            SectionFooterErrorView(
+              errorMessage: sendTokenStore.addressError?.localizedDescription
+            )
         ) {
           VStack {
             HStack(spacing: 14.0) {
@@ -178,7 +168,7 @@ struct SendTokenView: View {
                   sendTokenStore.sendAddress = string
                 }
               }) {
-                Label(Strings.Wallet.pasteFromPasteboard, braveSystemImage: "brave.clipboard")
+                Label(Strings.Wallet.pasteFromPasteboard, braveSystemImage: "leo.copy.plain-text")
                   .labelStyle(.iconOnly)
                   .foregroundColor(Color(.primaryButtonTint))
                   .font(.body)
@@ -187,7 +177,7 @@ struct SendTokenView: View {
               Button(action: {
                 isShowingScanner = true
               }) {
-                Label(Strings.Wallet.scanQRCodeAccessibilityLabel, braveSystemImage: "brave.qr-code")
+                Label(Strings.Wallet.scanQRCodeAccessibilityLabel, braveSystemImage: "leo.qr.code")
                   .labelStyle(.iconOnly)
                   .foregroundColor(Color(.primaryButtonTint))
                   .font(.body)
@@ -280,6 +270,16 @@ struct SendTokenView: View {
           address: $sendTokenStore.sendAddress
         )
       }
+      .sheet(isPresented: $isShowingSelectAccountTokenView) {
+        NavigationView {
+          SelectAccountTokenView(
+            store: sendTokenStore.selectTokenStore,
+            networkStore: networkStore
+          )
+          .navigationTitle(Strings.Wallet.selectTokenToSendTitle)
+          .navigationBarTitleDisplayMode(.inline)
+        }
+      }
       .navigationTitle(Strings.Wallet.send)
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -291,8 +291,9 @@ struct SendTokenView: View {
         }
       }
     }
-    .onAppear {
+    .task {
       sendTokenStore.update()
+      await sendTokenStore.selectTokenStore.update()
     }
     .navigationViewStyle(.stack)
   }

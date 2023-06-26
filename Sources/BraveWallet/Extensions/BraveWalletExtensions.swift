@@ -93,7 +93,7 @@ extension BraveWallet.OriginInfo {
 }
 
 extension BraveWallet.CoinType {
-  var keyringId: String {
+  public var keyringId: String {
     switch self {
     case .eth:
       return BraveWallet.DefaultKeyringId
@@ -101,6 +101,8 @@ extension BraveWallet.CoinType {
       return BraveWallet.SolanaKeyringId
     case .fil:
       return BraveWallet.FilecoinKeyringId
+    case .btc:
+      return BraveWallet.BitcoinKeyring84Id
     @unknown default:
       return BraveWallet.DefaultKeyringId
     }
@@ -114,6 +116,8 @@ extension BraveWallet.CoinType {
       return Strings.Wallet.coinTypeSolana
     case .fil:
       return Strings.Wallet.coinTypeFilecoin
+    case .btc:
+      fallthrough
     @unknown default:
       return Strings.Wallet.coinTypeUnknown
     }
@@ -127,6 +131,8 @@ extension BraveWallet.CoinType {
       return Strings.Wallet.coinTypeSolanaDescription
     case .fil:
       return Strings.Wallet.coinTypeFilecoinDescription
+    case .btc:
+      fallthrough
     @unknown default:
       return Strings.Wallet.coinTypeUnknown
     }
@@ -140,6 +146,8 @@ extension BraveWallet.CoinType {
       return "sol-asset-icon"
     case .fil:
       return "filecoin-asset-icon"
+    case .btc:
+      fallthrough
     @unknown default:
       return ""
     }
@@ -153,6 +161,8 @@ extension BraveWallet.CoinType {
       return Strings.Wallet.defaultSolAccountName
     case .fil:
       return Strings.Wallet.defaultFilAccountName
+    case .btc:
+      fallthrough
     @unknown default:
       return ""
     }
@@ -166,6 +176,8 @@ extension BraveWallet.CoinType {
       return Strings.Wallet.defaultSecondarySolAccountName
     case .fil:
       return Strings.Wallet.defaultSecondaryFilAccountName
+    case .btc:
+      fallthrough
     @unknown default:
       return ""
     }
@@ -180,6 +192,8 @@ extension BraveWallet.CoinType {
       return 2
     case .fil:
       return 3
+    case .btc:
+      fallthrough
     @unknown default:
       return 10
     }
@@ -211,6 +225,15 @@ extension BraveWallet.NetworkInfo {
     && symbol.caseInsensitiveCompare(token.symbol) == .orderedSame
     && nativeToken.decimals == token.decimals
     && coin == token.coin
+  }
+  
+  /// The group id that this network should generate for any token
+  /// that belongs to this network.
+  /// - Warning: This format must to updated if
+  /// `BraveWallet.BlockchainToken.walletUserAssetGroupId` format is
+  ///  changed under `Data`
+  var walletUserAssetGroupId: String {
+    "\(coin.rawValue).\(chainId)"
   }
 }
 
@@ -302,6 +325,12 @@ extension BraveWallet.OnRampProvider {
   }
 }
 
+extension BraveWallet.CoinMarket {
+  static func abbreviateToBillion(input: Double) -> Double {
+    input / 1000000000
+  }
+}
+
 public extension String {
   /// Returns true if the string ends with a supported ENS extension.
   var endsWithSupportedENSExtension: Bool {
@@ -311,5 +340,23 @@ public extension String {
   /// Returns true if the string ends with a supported SNS extension.
   var endsWithSupportedSNSExtension: Bool {
     WalletConstants.supportedSNSExtensions.contains(where: hasSuffix)
+  }
+  
+  /// Returns true if the string ends with a supported UD extension.
+  var endsWithSupportedUDExtension: Bool {
+    WalletConstants.supportedUDExtensions.contains(where: hasSuffix)
+  }
+  
+  /// Returns true if `Self` is a valid account name
+  var isValidAccountName: Bool {
+    self.count <= 30
+  }
+}
+
+public extension URL {
+  /// Returns true if url's scheme is supported to be resolved using IPFS public gateway
+  var isIPFSScheme: Bool {
+    guard let scheme = self.scheme?.lowercased() else { return false }
+    return WalletConstants.supportedIPFSSchemes.contains(scheme)
   }
 }

@@ -5,7 +5,7 @@
 
 import Foundation
 import BraveCore
-import BraveShared
+import Preferences
 import Combine
 import DeviceCheck
 import Shared
@@ -28,12 +28,8 @@ public class BraveRewards: NSObject {
 
   private let configuration: Configuration
 
-  init(configuration: Configuration, buildChannel: Ads.BuildChannelInfo?) {
+  init(configuration: Configuration) {
     self.configuration = configuration
-
-    if let channel = buildChannel {
-      BraveAds.buildChannelInfo = channel
-    }
 
     ads = BraveAds(stateStoragePath: configuration.storageURL.appendingPathComponent("ads").path)
 
@@ -64,37 +60,40 @@ public class BraveRewards: NSObject {
     ledger?.initializeLedgerService { [weak self] in
       guard let self = self, let ledger = self.ledger else { return }
       if self.ads.isEnabled {
-        if self.ads.isAdsServiceRunning() {
-          self.updateAdsWithWalletInfo()
-        } else {
-          self.ads.initialize { success in
-            if success {
-              self.updateAdsWithWalletInfo()
-            }
-          }
-        }
+        self.fetchWalletAndInitializeAds()
       }
       self.ledgerServiceDidStart?(ledger)
       completion?()
     }
   }
 
-  private func updateAdsWithWalletInfo() {
+  private(set) var isAdsInitialized: Bool = false
+  private func fetchWalletAndInitializeAds() {
+    if isAdsInitialized {
+      return
+    }
+    isAdsInitialized = true
     guard let ledger = ledger else { return }
     ledger.currentWalletInfo { wallet in
-      guard let wallet = wallet else { return }
-      let seed = wallet.recoverySeed.map(\.uint8Value)
-      self.ads.updateWalletInfo(
-        wallet.paymentId,
-        base64Seed: Data(seed).base64EncodedString()
-      )
+      if let wallet = wallet {
+        let seed = wallet.recoverySeed.map(\.uint8Value)
+        self.ads.updateWalletInfo(
+          wallet.paymentId,
+          base64Seed: Data(seed).base64EncodedString()
+        )
+      }
+      self.ads.initialize() { success in
+        if !success {
+          self.isAdsInitialized = false
+        }
+      }
     }
   }
 
   private var braveNewsObservation: AnyCancellable?
 
   private var shouldShutdownAds: Bool {
-    ads.isAdsServiceRunning() && !ads.isEnabled && !Preferences.BraveNews.isEnabled.value
+    ads.isAdsServiceRunning() && isAdsInitialized && !ads.isEnabled && !Preferences.BraveNews.isEnabled.value
   }
 
   /// Propose that the ads service should be shutdown based on whether or not that all features
@@ -103,6 +102,7 @@ public class BraveRewards: NSObject {
     if !shouldShutdownAds { return }
     ads.shutdown {
       self.ads = BraveAds(stateStoragePath: self.configuration.storageURL.appendingPathComponent("ads").path)
+      self.isAdsInitialized = false
     }
   }
 
@@ -118,7 +118,7 @@ public class BraveRewards: NSObject {
       Preferences.Rewards.rewardsToggledOnce.value = true
       createWalletIfNeeded { [weak self] in
         guard let self = self else { return }
-        self.ledger?.isAutoContributeEnabled = newValue
+        self.ledger?.setAutoContributeEnabled(newValue)
         let wasEnabled = self.ads.isEnabled
         self.ads.isEnabled = newValue
         if !wasEnabled && newValue {
@@ -130,15 +130,7 @@ public class BraveRewards: NSObject {
         if !newValue {
           self.proposeAdsShutdown()
         } else {
-          if self.ads.isAdsServiceRunning() {
-            self.updateAdsWithWalletInfo()
-          } else {
-            self.ads.initialize { success in
-              if success {
-                self.updateAdsWithWalletInfo()
-              }
-            }
-          }
+          self.fetchWalletAndInitializeAds()
         }
         self.didChangeValue(for: \.isEnabled)
       }
@@ -165,7 +157,7 @@ public class BraveRewards: NSObject {
     try? FileManager.default.removeItem(
       at: configuration.storageURL.appendingPathComponent("ledger")
     )
-    if ads.isAdsServiceRunning(), !Preferences.BraveNews.isEnabled.value {
+    if ads.isAdsServiceRunning(), isAdsInitialized, !Preferences.BraveNews.isEnabled.value {
       ads.shutdown { [self] in
         try? FileManager.default.removeItem(
           at: configuration.storageURL.appendingPathComponent("ads")
@@ -191,7 +183,9 @@ public class BraveRewards: NSObject {
       ledger?.selectedTabId = UInt32(tabId)
       tabRetrieved(tabId, url: url, html: nil)
     }
-    ads.reportTabUpdated(tabId, url: url, redirectedFrom: tab.redirectURLs, isSelected: isSelected, isPrivate: isPrivate)
+    if isAdsInitialized && !isPrivate {
+      ads.reportTabUpdated(tabId, url: url, redirectedFrom: tab.redirectURLs, isSelected: isSelected)
+    }
   }
 
   /// Report that a page has loaded in the current browser tab, and the HTML is available for analysis
@@ -206,7 +200,7 @@ public class BraveRewards: NSObject {
     adsInnerText: String?
   ) {
     tabRetrieved(tabId, url: url, html: html)
-    if let innerText = adsInnerText {
+    if let innerText = adsInnerText, isAdsInitialized {
       ads.reportLoadedPage(
         with: url,
         redirectedFrom: redirectionURLs ?? [],
@@ -230,11 +224,13 @@ public class BraveRewards: NSObject {
 
   /// Report that media has started on a tab with a given id
   func reportMediaStarted(tabId: Int) {
+    if !isAdsInitialized { return }
     ads.reportMediaStarted(tabId: tabId)
   }
 
   /// Report that media has stopped on a tab with a given id
   func reportMediaStopped(tabId: Int) {
+    if !isAdsInitialized { return }
     ads.reportMediaStopped(tabId: tabId)
   }
 
@@ -245,7 +241,9 @@ public class BraveRewards: NSObject {
 
   /// Report that a tab with a given id was closed by the user
   func reportTabClosed(tabId: Int) {
-    ads.reportTabClosed(tabId: tabId)
+    if isAdsInitialized {
+      ads.reportTabClosed(tabId: tabId)
+    }
     ledger?.reportTabNavigationOrClosed(tabId: UInt32(tabId))
   }
 
@@ -306,7 +304,7 @@ extension BraveRewards {
 
     var storageURL: URL
     public var environment: Environment
-    public var adsBuildChannel: Ads.BuildChannelInfo = .init()
+    public var adsBuildChannel: BraveAds.BuildChannelInfo = .init()
     public var isDebug: Bool?
     public var overridenNumberOfSecondsBetweenReconcile: Int?
     public var retryInterval: Int?

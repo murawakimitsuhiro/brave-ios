@@ -9,14 +9,14 @@ import BraveCore
 import SwiftUI
 import BraveUI
 import Shared
-import BraveShared
+import Preferences
 import Data
 import os.log
 import Growth
 
 extension WalletStore {
   /// Creates a WalletStore based on whether or not the user is in Private Mode
-  static func from(ipfsApi: IpfsAPI?, privateMode: Bool) -> WalletStore? {
+  static func from(ipfsApi: IpfsAPI, privateMode: Bool) -> WalletStore? {
     guard
       let keyringService = BraveWallet.KeyringServiceFactory.get(privateMode: privateMode),
       let rpcService = BraveWallet.JsonRpcServiceFactory.get(privateMode: privateMode),
@@ -47,7 +47,7 @@ extension WalletStore {
 
 extension CryptoStore {
   /// Creates a CryptoStore based on whether or not the user is in Private Mode
-  static func from(ipfsApi: IpfsAPI?, privateMode: Bool) -> CryptoStore? {
+  static func from(ipfsApi: IpfsAPI, privateMode: Bool) -> CryptoStore? {
     guard
       let keyringService = BraveWallet.KeyringServiceFactory.get(privateMode: privateMode),
       let rpcService = BraveWallet.JsonRpcServiceFactory.get(privateMode: privateMode),
@@ -93,8 +93,10 @@ extension BrowserViewController {
     return walletStore
   }
   
+  /// Presents the Wallet panel for a given origin
   func presentWalletPanel(from origin: URLOrigin, with tabDappStore: TabDappStore) {
     guard let walletStore = self.walletStore ?? newWalletStore() else { return }
+    walletStore.origin = origin
     let controller = WalletPanelHostingController(
       walletStore: walletStore,
       tabDappStore: tabDappStore,
@@ -119,11 +121,11 @@ extension BrowserViewController: BraveWalletDelegate {
       }
       // Handle App Rating
       // User is either finished sending/swapping a crypto token or added an account to wallet.
-      AppReviewManager.shared.handleAppReview(for: self)
+      AppReviewManager.shared.handleAppReview(for: .revised, using: self)
     }
   }
   
-  public func openWalletURL(_ destinationURL: URL) {
+  public func openDestinationURL(_ destinationURL: URL) {
     if presentedViewController != nil {
       // dismiss to show the new tab
       self.dismiss(animated: true)
@@ -168,6 +170,14 @@ extension Tab: BraveWalletProviderDelegate {
 
   func getOrigin() -> URLOrigin {
     guard let origin = url?.origin else {
+      // A nil url is possible if multiple tabs are restored but one or more
+      // of the tabs is not opened yet (loaded the url). When a new chain is
+      // assigned for a specific origin, the provider(s) will check origin
+      // of all open Tab's to see if that provider needs(s) updated too.
+      // We can get the url from the SessionTab, and return it's origin.
+      if let sessionTabOrigin = SessionTab.from(tabId: id)?.url.origin {
+        return sessionTabOrigin
+      }
       assert(false, "We should have a valid origin to get to this point")
       return .init()
     }
@@ -201,7 +211,7 @@ extension Tab: BraveWalletProviderDelegate {
             completion(.internal, nil)
             return
           }
-        case .fil:
+        case .fil, .btc:
           // not supported
           fallthrough
         @unknown default:
@@ -210,24 +220,23 @@ extension Tab: BraveWalletProviderDelegate {
         }
       }
       
-      guard WalletStore.from(ipfsApi: nil, privateMode: isPrivate) != nil else {
+      guard !isPrivate else {
         completion(.internal, nil)
         return
       }
-      let (success, allowedAccounts) = await allowedAccounts(coinType, accounts: accounts)
-      if !success {
+      let allowedAccounts = getAllowedAccounts(coinType, accounts: accounts) ?? []
+      if !allowedAccounts.isEmpty {
         completion(.internal, [])
         return
       }
       switch coinType {
       case .eth:
-        if success, !allowedAccounts.isEmpty {
+        if !allowedAccounts.isEmpty {
           completion(.none, allowedAccounts)
           return
         }
       case .sol:
-        if success,
-           accounts.count == 1, // only 1 Solana account connect at a time
+        if accounts.count == 1, // only 1 Solana account connect at a time
            let account = accounts.first,
            allowedAccounts.contains(account) {
           completion(.none, allowedAccounts)
@@ -260,47 +269,49 @@ extension Tab: BraveWalletProviderDelegate {
       self.tabDelegate?.showWalletNotification(self, origin: origin)
     }
   }
+  
+  /// Returns the selected account if present in `allowedAccounts`, otherwise returns `allowedAccounts`
+  private func filterAllowedAccounts(
+    _ allowedAccounts: [String],
+    selectedAccount: String?
+  ) -> [String] {
+    if let selectedAccount = selectedAccount, allowedAccounts.contains(selectedAccount) {
+      return [selectedAccount]
+    }
+    return allowedAccounts
+  }
 
-  @MainActor func allowedAccountsForCurrentCoin() async -> (Bool, [String]) {
+  /// Helper to fetch the allowed accounts for the current coin. Unlike `allowedAccounts(_:accounts:)`
+  /// this will filter the selected account to the front of the array if it is an allowed/permitted account
+  @MainActor func allowedAccountsForCurrentCoin() async -> [String] {
     guard let keyringService = BraveWallet.KeyringServiceFactory.get(privateMode: false),
           let walletService = BraveWallet.ServiceFactory.get(privateMode: false) else {
-      return (false, [])
+      return []
     }
     let coin = await walletService.selectedCoin()
-    let accounts = await keyringService.keyringInfo(coin.keyringId).accountInfos.map(\.address)
-    return await allowedAccounts(coin, accounts: accounts)
+    let allAccounts = await keyringService.keyringInfo(coin.keyringId).accountInfos.map(\.address)
+    guard let allowedAccounts = getAllowedAccounts(coin, accounts: allAccounts) else {
+      return []
+    }
+    let selectedAccounts = await keyringService.selectedAccount(coin)
+    return filterAllowedAccounts(allowedAccounts, selectedAccount: selectedAccounts)
   }
   
-  @MainActor func allowedAccounts(_ type: BraveWallet.CoinType, accounts: [String]) async -> (Bool, [String]) {
-    func filterAccounts(
-      _ accounts: [String],
-      selectedAccount: String?
-    ) -> [String] {
-      if let selectedAccount = selectedAccount, accounts.contains(selectedAccount) {
-        return [selectedAccount]
-      }
-      return accounts
+  /// Fetches all allowed accounts for the current origin.
+  func getAllowedAccounts(_ type: BraveWallet.CoinType, accounts: [String]) -> [String]? {
+    guard let originURL = url?.origin.url,
+          let permissions = Domain.walletPermissions(forUrl: originURL, coin: type) else {
+      return []
     }
-    // This method is called immediately upon creation of the wallet provider, which happens at tab
-    // configuration, which means it may not be selected or ready yet.
-    guard let keyringService = BraveWallet.KeyringServiceFactory.get(privateMode: false),
-          let originURL = url?.origin.url else {
-      return (false, [])
-    }
-    let isLocked = await keyringService.isLocked()
-    if isLocked {
-      return (false, [])
-    }
-    let selectedAccount = await keyringService.selectedAccount(type)
-    let permissions = Domain.walletPermissions(forUrl: originURL, coin: type)
-    return (
-      true,
-      filterAccounts(permissions ?? [], selectedAccount: selectedAccount)
-    )
+    // keyring locked status is checked in `EthereumProviderImpl::GetAllowedAccounts`
+    return permissions
   }
   
-  func isAccountAllowed(_ type: BraveWallet.CoinType, account: String) async -> Bool {
-    return await allowedAccounts(type, accounts: [account]).1.contains(account)
+  func isAccountAllowed(_ type: BraveWallet.CoinType, account: String) -> Bool {
+    guard let allowedAccounts = getAllowedAccounts(type, accounts: [account]) else {
+      return false
+    }
+    return allowedAccounts.contains(account)
   }
   
   func walletInteractionDetected() {
@@ -321,7 +332,7 @@ extension Tab: BraveWalletProviderDelegate {
       return !Preferences.Wallet.allowEthProviderAccess.value
     case .sol:
       return !Preferences.Wallet.allowSolProviderAccess.value
-    case .fil:
+    case .fil, .btc:
       return true
     @unknown default:
       return true
@@ -377,24 +388,24 @@ extension Tab: BraveWalletProviderDelegate {
   
   func clearSolanaConnectedAccounts() {
     Task { @MainActor in
-        tabDappStore.solConnectedAddresses = .init()
-        await updateSolanaProperties()
+      tabDappStore.solConnectedAddresses = .init()
+      await updateSolanaProperties()
     }
   }
 }
 
 extension Tab: BraveWalletEventsListener {
   func emitEthereumEvent(_ event: Web3ProviderEvent) {
-    guard !isPrivate else { return }
-    
-    guard Preferences.Wallet.defaultEthWallet.value == Preferences.Wallet.WalletType.brave.rawValue else {
+    guard !isPrivate,
+          Preferences.Wallet.defaultEthWallet.value == Preferences.Wallet.WalletType.brave.rawValue,
+          let webView = self.webView else {
       return
     }
     var arguments: [Any] = [event.name]
     if let eventArgs = event.arguments {
       arguments.append(eventArgs)
     }
-    webView?.evaluateSafeJavaScript(
+    webView.evaluateSafeJavaScript(
       functionName: "window.ethereum.emit",
       args: arguments,
       contentWorld: EthereumProviderScriptHandler.scriptSandbox,
@@ -406,6 +417,13 @@ extension Tab: BraveWalletEventsListener {
     guard !isPrivate else { return }
     
     Task { @MainActor in
+      // chain change might not apply to this origin when assigning
+      // new default network / nil origin: brave-browser #30344
+      guard let provider = walletEthProvider,
+            case let providerChainId = await provider.chainId(),
+            providerChainId == chainId
+      else { return }
+      
       // Temporary fix for #5404
       // Ethereum properties have been updated correctly, however, dapp is not updated unless there is a reload
       // We keep the same as Metamask, that, we will reload tab on chain changes.
@@ -418,11 +436,6 @@ extension Tab: BraveWalletEventsListener {
   func accountsChangedEvent(_ accounts: [String]) {
     guard !isPrivate else { return }
     
-    // Temporary fix for #5402.
-    // If we emit from one account directly to another we're not seeing dapp sites
-    // update our selected account. If we emit an undefined/empty string before
-    // emitting the new account, we're seeing correct account change behaviour
-    emitEthereumEvent(.ethereumAccountsChanged(accounts: []))
     emitEthereumEvent(.ethereumAccountsChanged(accounts: accounts))
     
     Task {
@@ -434,7 +447,6 @@ extension Tab: BraveWalletEventsListener {
   func updateEthereumProperties() async {
     guard !isPrivate,
           let keyringService = BraveWallet.KeyringServiceFactory.get(privateMode: false),
-          let walletService = BraveWallet.ServiceFactory.get(privateMode: false),
           Preferences.Wallet.defaultEthWallet.value == Preferences.Wallet.WalletType.brave.rawValue else {
       return
     }
@@ -469,16 +481,39 @@ extension Tab: BraveWalletEventsListener {
       asFunction: false
     )
     
-    let coin = await walletService.selectedCoin()
-    let accounts = await keyringService.keyringInfo(coin.keyringId).accountInfos.map(\.address)
-    let selectedAccount = valueOrUndefined(await self.allowedAccounts(coin, accounts: accounts).1.first)
+    let coin: BraveWallet.CoinType = .eth
+    let keyring = await keyringService.keyringInfo(coin.keyringId)
+    let selectedAccount: String
+    if keyring.isLocked {
+      // Check for locked status before assigning account address.
+      // `getAllowedAccounts` is not async, can't check locked status.
+      selectedAccount = valueOrUndefined(Optional<String>.none)
+    } else {
+      let allAccounts = keyring.accountInfos.map(\.address)
+      if let allowedAccounts = getAllowedAccounts(coin, accounts: allAccounts) {
+        let selectedAccountForCoin = await keyringService.selectedAccount(coin)
+        let filteredAllowedAccounts = filterAllowedAccounts(allowedAccounts, selectedAccount: selectedAccountForCoin)
+        selectedAccount = valueOrUndefined(filteredAllowedAccounts.first)
+      } else {
+        selectedAccount = valueOrUndefined(Optional<String>.none)
+      }
+    }
     await webView.evaluateSafeJavaScript(
       functionName: "window.ethereum.selectedAddress = \(selectedAccount)",
       contentWorld: EthereumProviderScriptHandler.scriptSandbox,
-      asFunction: false)
+      asFunction: false
+    )
   }
   
   func messageEvent(_ subscriptionId: String, result: MojoBase.Value) {
+    let eventArgs = MojoBase.Value(dictionaryValue: [
+      "type": MojoBase.Value(stringValue: "eth_subscription"),
+      "data": MojoBase.Value(dictionaryValue: [
+        "subscription": MojoBase.Value(stringValue: subscriptionId),
+        "result": result
+      ])
+    ])
+    emitEthereumEvent(.init("message", arguments: eventArgs.jsonObject))
   }
 }
 
@@ -549,21 +584,6 @@ extension Tab: BraveWalletSolanaEventsListener {
   }
 }
 
-extension BraveWallet.CoinType {
-  var keyringId: String {
-    switch self {
-    case .eth:
-      return BraveWallet.DefaultKeyringId
-    case .sol:
-      return BraveWallet.SolanaKeyringId
-    case .fil:
-      return BraveWallet.FilecoinKeyringId
-    @unknown default:
-      return ""
-    }
-  }
-}
-
 extension Tab: BraveWalletKeyringServiceObserver {
   func keyringCreated(_ keyringId: String) {
   }
@@ -577,6 +597,10 @@ extension Tab: BraveWalletKeyringServiceObserver {
   }
   
   func locked() {
+    Task {
+      await updateEthereumProperties()
+      await updateSolanaProperties()
+    }
   }
   
   func unlocked() {
@@ -586,8 +610,8 @@ extension Tab: BraveWalletKeyringServiceObserver {
       let permissionRequestManager = WalletProviderPermissionRequestsManager.shared
       if permissionRequestManager.hasPendingRequest(for: origin, coinType: .eth) {
         let pendingRequests = permissionRequestManager.pendingRequests(for: origin, coinType: .eth)
-        let (success, accounts) = await allowedAccountsForCurrentCoin()
-        if success, !accounts.isEmpty {
+        let accounts = await allowedAccountsForCurrentCoin()
+        if !accounts.isEmpty {
           for request in pendingRequests {
             // cancel the requests if `allowedAccounts` is not empty for this domain
             permissionRequestManager.cancelRequest(request)
@@ -611,6 +635,6 @@ extension Tab: BraveWalletKeyringServiceObserver {
   func selectedAccountChanged(_ coin: BraveWallet.CoinType) {
   }
   
-  func accountsAdded(_ coin: BraveWallet.CoinType, addresses: [String]) {
+  func accountsAdded(_ addedAccounts: [BraveWallet.AccountInfo]) {
   }
 }

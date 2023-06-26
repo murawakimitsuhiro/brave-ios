@@ -13,8 +13,15 @@ import BraveCore
   private var cancellables: Set<AnyCancellable> = .init()
   
   private func setupStore(
-    network: BraveWallet.NetworkInfo = .mockGoerli,
-    accountInfos: [BraveWallet.AccountInfo] = [],
+    selectedNetworkForCoinType: [BraveWallet.CoinType: BraveWallet.NetworkInfo] = [
+      .eth : BraveWallet.NetworkInfo.mockMainnet,
+      .sol : BraveWallet.NetworkInfo.mockSolana
+    ],
+    allNetworksForCoinType: [BraveWallet.CoinType: [BraveWallet.NetworkInfo]] = [
+      .eth: [.mockMainnet, .mockGoerli],
+      .sol: [.mockSolana, .mockSolanaTestnet]
+    ],
+    accountInfos: [BraveWallet.AccountInfo] = [.mockEthAccount, .mockSolAccount],
     allTokens: [BraveWallet.BlockchainToken] = [],
     transactions: [BraveWallet.TransactionInfo] = [],
     gasEstimation: BraveWallet.GasEstimation1559 = .init(),
@@ -31,53 +38,73 @@ import BraveCore
       completion(true, [mockEthAssetPrice, mockSolAssetPrice])
     }
     let rpcService = BraveWallet.TestJsonRpcService()
-    rpcService._chainId = { $1(network.chainId) }
-    rpcService._network = { $1(network) }
+    rpcService._chainIdForOrigin = { coin, origin, completion in
+      completion(selectedNetworkForCoinType[coin]?.chainId ?? BraveWallet.MainnetChainId)
+    }
+    rpcService._network = { coin, origin, completion in
+      completion(selectedNetworkForCoinType[coin] ?? .mockMainnet)
+    }
+    rpcService._allNetworks = { coin, completion in
+      completion(allNetworksForCoinType[coin] ?? [])
+    }
     rpcService._balance = { _, _, _, completion in
       completion(mockBalanceWei, .success, "")
     }
-    rpcService._erc20TokenAllowance = { _, _, _, completion in
+    rpcService._erc20TokenAllowance = { _, _, _, _, completion in
       completion("16345785d8a0000", .success, "") // 0.1000
     }
     let txService = BraveWallet.TestTxService()
     txService._addObserver = { _ in }
-    txService._allTransactionInfo = { _, _, completion in
-      completion(transactions)
+    txService._allTransactionInfo = { coin, chainId, address, completion in
+      let filteredTransactions = transactions.filter {
+        if let chainId = chainId {
+          return $0.coin == coin && $0.chainId == chainId
+        } else {
+          return $0.coin == coin
+        }
+      }
+      completion(filteredTransactions)
     }
     let blockchainRegistry = BraveWallet.TestBlockchainRegistry()
     blockchainRegistry._allTokens = { _, _, completion in
       completion(allTokens)
     }
     let walletService = BraveWallet.TestBraveWalletService()
-    walletService._userAssets = { _, _, completion in
-      completion([])
-    }
     walletService._defaultBaseCurrency = { $0(CurrencyCode.usd.code) }
     walletService._addObserver = { _ in }
     walletService._selectedCoin = { $0(BraveWallet.CoinType.eth) }
+    let mockAssetManager = TestableWalletUserAssetManager()
+    mockAssetManager._getAllUserAssetsInNetworkAssets = { _ in
+      []
+    }
     let ethTxManagerProxy = BraveWallet.TestEthTxManagerProxy()
-    ethTxManagerProxy._gasEstimation1559 = { completion in
+    ethTxManagerProxy._gasEstimation1559 = { _, completion in
       completion(gasEstimation)
     }
     ethTxManagerProxy._makeErc20ApproveData = { _, _, completion in
       completion(makeErc20ApproveDataSuccess, [])
     }
-    ethTxManagerProxy._setDataForUnapprovedTransaction = { _, _, completion in
+    ethTxManagerProxy._setDataForUnapprovedTransaction = { _, _, _, completion in
       completion(setDataForUnapprovedTransactionSuccess)
     }
     let keyringService = BraveWallet.TestKeyringService()
-    keyringService._keyringInfo = { _, completion in
+    keyringService._keyringInfo = { id, completion in
       let keyring: BraveWallet.KeyringInfo = .init(
-        id: BraveWallet.DefaultKeyringId,
+        id: id,
         isKeyringCreated: true,
         isLocked: false,
         isBackedUp: true,
-        accountInfos: accountInfos)
+        accountInfos: [])
+      if id == BraveWallet.DefaultKeyringId {
+        keyring.accountInfos = accountInfos.filter { $0.coin == .eth }
+      } else {
+        keyring.accountInfos = accountInfos.filter { $0.coin == .sol }
+      }
       completion(keyring)
     }
     
     let solTxManagerProxy = BraveWallet.TestSolanaTxManagerProxy()
-    solTxManagerProxy._estimatedTxFee = { $1(0, .success, "") }
+    solTxManagerProxy._estimatedTxFee = { $2(0, .success, "") }
     
     return TransactionConfirmationStore(
       assetRatioService: assetRatioService,
@@ -87,7 +114,8 @@ import BraveCore
       walletService: walletService,
       ethTxManagerProxy: ethTxManagerProxy,
       keyringService: keyringService,
-      solTxManagerProxy: solTxManagerProxy
+      solTxManagerProxy: solTxManagerProxy,
+      userAssetManager: mockAssetManager
     )
   }
   
@@ -101,7 +129,6 @@ import BraveCore
     }
     let mockGasEstimation: BraveWallet.GasEstimation1559 = .init()
     let store = setupStore(
-      network: .mockSolana,
       accountInfos: [.mockSolAccount],
       allTokens: mockAllTokens,
       transactions: mockTransactions,
@@ -148,7 +175,7 @@ import BraveCore
       }
       .store(in: &cancellables)
 
-    wait(for: [prepareExpectation], timeout: 1)
+    await fulfillment(of: [prepareExpectation], timeout: 1)
   }
   
   /// Test `prepare()`  update `state` data for symbol, value, isUnlimitedApprovalRequested.
@@ -161,7 +188,6 @@ import BraveCore
     }
     let mockGasEstimation: BraveWallet.GasEstimation1559 = .init()
     let store = setupStore(
-      network: .mockSolana,
       accountInfos: [.mockSolAccount],
       allTokens: mockAllTokens,
       transactions: mockTransactions,
@@ -208,7 +234,7 @@ import BraveCore
       }
       .store(in: &cancellables)
     
-    wait(for: [prepareExpectation], timeout: 1)
+    await fulfillment(of: [prepareExpectation], timeout: 1)
   }
   
   /// Test `prepare()`  update `state` data for symbol, value, isUnlimitedApprovalRequested.
@@ -221,7 +247,7 @@ import BraveCore
     }
     let mockGasEstimation: BraveWallet.GasEstimation1559 = .init()
     let store = setupStore(
-      accountInfos: [.previewAccount],
+      accountInfos: [.mockEthAccount],
       allTokens: mockAllTokens,
       transactions: mockTransactions,
       gasEstimation: mockGasEstimation
@@ -269,7 +295,67 @@ import BraveCore
       }
       .store(in: &cancellables)
     
-    wait(for: [prepareExpectation], timeout: 1)
+    await fulfillment(of: [prepareExpectation], timeout: 1)
+  }
+  
+  /// Test `network` property is updated for the `activeTransaction`, regardess of the current selected network for that coin type.
+  func testPrepareTransactionNotOnSelectedNetwork() async {
+    let firstTransactionDate = Date(timeIntervalSince1970: 1636399671) // Monday, November 8, 2021 7:27:51 PM
+    let sendCopy = BraveWallet.TransactionInfo.previewConfirmedSend.copy() as! BraveWallet.TransactionInfo
+    sendCopy.chainId = BraveWallet.GoerliChainId
+    sendCopy.txStatus = .unapproved
+    let swapCopy = BraveWallet.TransactionInfo.previewConfirmedSwap.copy() as! BraveWallet.TransactionInfo
+    swapCopy.chainId = BraveWallet.MainnetChainId
+    swapCopy.txStatus = .unapproved
+    let solanaSendCopy = BraveWallet.TransactionInfo.previewConfirmedSolSystemTransfer.copy() as! BraveWallet.TransactionInfo
+    solanaSendCopy.chainId = BraveWallet.SolanaMainnet
+    let solanaSPLSendCopy = BraveWallet.TransactionInfo.previewConfirmedSolTokenTransfer.copy() as! BraveWallet.TransactionInfo
+    solanaSPLSendCopy.chainId = BraveWallet.SolanaTestnet
+    let pendingTransactions: [BraveWallet.TransactionInfo] = [
+      sendCopy, swapCopy, solanaSendCopy, solanaSPLSendCopy
+    ].enumerated().map { (index, tx) in
+      tx.txStatus = .unapproved
+      // transactions sorted by created time, make sure they are in-order
+      tx.createdTime = firstTransactionDate.addingTimeInterval(TimeInterval(index))
+      return tx
+    }
+    let allTokens: [BraveWallet.BlockchainToken] = [.previewToken, .daiToken]
+    let store = setupStore(
+      allTokens: allTokens,
+      transactions: pendingTransactions
+    )
+    let networkExpectation = expectation(description: "network-expectation")
+    store.$network
+      .dropFirst(6) // `network` is assigned multiple times during setup
+      .collect(4) // collect all transactions
+      .sink { networks in
+        defer { networkExpectation.fulfill() }
+        XCTAssertEqual(networks.count, 4)
+        XCTAssertEqual(networks[safe: 0], BraveWallet.NetworkInfo.mockSolanaTestnet)
+        XCTAssertEqual(networks[safe: 1], BraveWallet.NetworkInfo.mockSolana)
+        XCTAssertEqual(networks[safe: 2], BraveWallet.NetworkInfo.mockMainnet)
+        XCTAssertEqual(networks[safe: 3], BraveWallet.NetworkInfo.mockGoerli)
+      }
+      .store(in: &cancellables)
+    let activeTransactionIdExpectation = expectation(description: "activeTransactionId-expectation")
+    store.$activeTransactionId
+      .dropFirst()
+      .collect(4) // collect all transactions
+      .sink { activeTransactionIds in
+        defer { activeTransactionIdExpectation.fulfill() }
+        XCTAssertEqual(activeTransactionIds.count, 4)
+        XCTAssertEqual(activeTransactionIds[safe: 0], pendingTransactions[safe: 3]?.id)
+        XCTAssertEqual(activeTransactionIds[safe: 1], pendingTransactions[safe: 2]?.id)
+        XCTAssertEqual(activeTransactionIds[safe: 2], pendingTransactions[safe: 1]?.id)
+        XCTAssertEqual(activeTransactionIds[safe: 3], pendingTransactions[safe: 0]?.id)
+      }
+      .store(in: &cancellables)
+    
+    await store.prepare() // `sendCopy` on Goerli Testnet
+    store.nextTransaction() // `swapCopy` on Ethereum Mainnet
+    store.nextTransaction() // `solanaSendCopy` on Solana Mainnet
+    store.nextTransaction() // `solanaSPLSendCopy` on Solana Testnet
+    await fulfillment(of: [networkExpectation, activeTransactionIdExpectation], timeout: 1)
   }
   
   /// Test `editAllowance(txMetaId:spenderAddress:amount:completion)` will return false if we fail to make ERC20 approve data with `BraveWalletEthTxManagerProxy`
@@ -282,7 +368,7 @@ import BraveCore
     }
     let mockGasEstimation: BraveWallet.GasEstimation1559 = .init()
     let store = setupStore(
-      accountInfos: [.previewAccount],
+      accountInfos: [.mockEthAccount],
       allTokens: mockAllTokens,
       transactions: mockTransactions,
       gasEstimation: mockGasEstimation,
@@ -297,13 +383,11 @@ import BraveCore
         XCTAssertEqual(id, mockTransaction.id)
       }
       .store(in: &cancellables)
-    waitForExpectations(timeout: 1) { error in
-      XCTAssertNil(error)
-    }
+    await fulfillment(of: [prepareExpectation], timeout: 1)
     
     let editExpectation = expectation(description: "edit allowance")
     store.editAllowance(
-      txMetaId: mockTransaction.id,
+      transaction: mockTransaction,
       spenderAddress: mockTransaction.txArgs[safe: 0] ?? "",
       amount: "0x0",
       completion: { success in
@@ -312,9 +396,7 @@ import BraveCore
         }
       }
     )
-    waitForExpectations(timeout: 1) { error in
-      XCTAssertNil(error)
-    }
+    await fulfillment(of: [editExpectation], timeout: 1)
   }
   
   /// Test `editAllowance(txMetaId:spenderAddress:amount:completion)` will return false if we fail to set new ERC20 Approve data with `BraveWalletEthTxManagerProxy`
@@ -327,7 +409,7 @@ import BraveCore
     }
     let mockGasEstimation: BraveWallet.GasEstimation1559 = .init()
     let store = setupStore(
-      accountInfos: [.previewAccount],
+      accountInfos: [.mockEthAccount],
       allTokens: mockAllTokens,
       transactions: mockTransactions,
       gasEstimation: mockGasEstimation,
@@ -343,13 +425,11 @@ import BraveCore
         XCTAssertEqual(id, mockTransaction.id)
       }
       .store(in: &cancellables)
-    waitForExpectations(timeout: 1) { error in
-      XCTAssertNil(error)
-    }
+    await fulfillment(of: [prepareExpectation], timeout: 1)
     
     let editExpectation = expectation(description: "edit allowance")
     store.editAllowance(
-      txMetaId: mockTransaction.id,
+      transaction: mockTransaction,
       spenderAddress: mockTransaction.txArgs[safe: 0] ?? "",
       amount: "0x0",
       completion: { success in
@@ -358,9 +438,7 @@ import BraveCore
         }
       }
     )
-    waitForExpectations(timeout: 1) { error in
-      XCTAssertNil(error)
-    }
+    await fulfillment(of: [editExpectation], timeout: 1)
   }
   
   /// Test `editAllowance(txMetaId:spenderAddress:amount:completion)` will return true if we suceed in creating and setting ERC20 Approve data with `BraveWalletEthTxManagerProxy`
@@ -373,7 +451,7 @@ import BraveCore
     }
     let mockGasEstimation: BraveWallet.GasEstimation1559 = .init()
     let store = setupStore(
-      accountInfos: [.previewAccount],
+      accountInfos: [.mockEthAccount],
       allTokens: mockAllTokens,
       transactions: mockTransactions,
       gasEstimation: mockGasEstimation,
@@ -389,13 +467,11 @@ import BraveCore
         XCTAssertEqual(id, mockTransaction.id)
       }
       .store(in: &cancellables)
-    waitForExpectations(timeout: 1) { error in
-      XCTAssertNil(error)
-    }
+    await fulfillment(of: [prepareExpectation], timeout: 1)
     
     let editExpectation = expectation(description: "edit allowance")
     store.editAllowance(
-      txMetaId: mockTransaction.id,
+      transaction: mockTransaction,
       spenderAddress: mockTransaction.txArgs[safe: 0] ?? "",
       amount: "0x0",
       completion: { success in
@@ -404,9 +480,7 @@ import BraveCore
         }
       }
     )
-    waitForExpectations(timeout: 1) { error in
-      XCTAssertNil(error)
-    }
+    await fulfillment(of: [editExpectation], timeout: 1)
   }
 }
 
@@ -419,6 +493,7 @@ private extension BraveWallet.BlockchainToken {
     logo: "",
     isErc20: true,
     isErc721: false,
+    isErc1155: false,
     isNft: false,
     symbol: "DAI",
     decimals: 18,
@@ -428,4 +503,21 @@ private extension BraveWallet.BlockchainToken {
     chainId: "",
     coin: .eth
   )
+}
+
+extension XCTestCase {
+  @MainActor func fulfillment(of expectations: [XCTestExpectation], timeout: TimeInterval) async {
+    #if compiler(>=5.8)
+    await fulfillment(of: expectations, timeout: timeout, enforceOrder: false)
+    #else
+    await withCheckedContinuation { continuation in
+      waitForExpectations(timeout: timeout) { error in
+        // `fulfillment(of:timeout:enforceOrder:) timeout will fail on the function
+        // Verify we did not timeout here
+        XCTAssertNil(error)
+        continuation.resume()
+      }
+    }
+    #endif
+  }
 }

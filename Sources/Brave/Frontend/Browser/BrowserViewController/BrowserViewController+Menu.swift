@@ -6,16 +6,17 @@
 import Foundation
 import SwiftUI
 import BraveUI
-import BraveShared
+import Preferences
 import Shared
 import Data
 import BraveWallet
 import BraveCore
 import os.log
+import BraveVPN
 
 extension BrowserViewController {
   func featuresMenuSection(_ menuController: MenuViewController) -> some View {
-    VStack(spacing: 0) {
+    VStack(alignment: .leading, spacing: 5) {
       VPNMenuButton(
         vpnProductInfo: self.vpnProductInfo,
         displayVPNDestination: { [unowned self] vc in
@@ -33,6 +34,13 @@ extension BrowserViewController {
           self?.openURLInNewTab(url, isPrivate: PrivateBrowsingManager.shared.isPrivateBrowsing,
                                isPrivileged: false)
         })
+      
+      // Region Button is populated without current selected detail title for features menu
+      RegionMenuButton(vpnRegionInfo: BraveVPN.activatedRegion, settingTitleEnabled: false, regionSelectAction: {
+        let vc = BraveVPNRegionPickerViewController()
+        (self.presentedViewController as? MenuViewController)?
+          .pushInnerMenu(vc)
+      })
     }
   }
 
@@ -65,6 +73,15 @@ extension BrowserViewController {
                                isPrivileged: false)
         }
       )
+      
+      // Region Button is populated including the details for privacy feature menu
+      RegionMenuButton(vpnRegionInfo: BraveVPN.activatedRegion, regionSelectAction: {
+        let vc = BraveVPNRegionPickerViewController()
+        (self.presentedViewController as? MenuViewController)?
+          .pushInnerMenu(vc)
+      })
+      
+      Divider()
 
       MenuItemFactory.button(for: .playlist(subtitle: Strings.OptionsMenu.bravePlaylistItemDescription)) { [weak self] in
         guard let self = self else { return }
@@ -160,7 +177,6 @@ extension BrowserViewController {
           tabManager: self.tabManager,
           feedDataSource: self.feedDataSource,
           rewards: self.rewards,
-          legacyWallet: self.legacyWallet,
           windowProtection: self.windowProtection,
           braveCore: self.braveCore,
           keyringStore: keyringStore,
@@ -172,8 +188,10 @@ extension BrowserViewController {
     }
   }
 
+  /// Presents Wallet without an origin (ex. from menu)
   func presentWallet() {
     guard let walletStore = self.walletStore ?? newWalletStore() else { return }
+    walletStore.origin = nil
     let vc = WalletHostingViewController(walletStore: walletStore)
     vc.delegate = self
     self.dismiss(animated: true) {
@@ -233,34 +251,26 @@ extension BrowserViewController {
                 }
               } else {
                 browserViewController.dismiss(animated: true) {
-                  let tab = browserViewController.tabManager.selectedTab
-
-                  if let webView = tab?.webView {
-                    PlaylistScriptHandler.getCurrentTime(webView: webView, nodeTag: item.tagId) { [weak browserViewController] currentTime in
-                      browserViewController?.openPlaylist(tab: tab, item: item, playbackOffset: currentTime)
-                    }
-                  } else {
-                    browserViewController.openPlaylist(tab: nil, item: item, playbackOffset: 0.0)
-                  }
+                  browserViewController.openPlaylist(tab: browserViewController.tabManager.selectedTab, item: item)
                 }
               }
             }
             .animation(.default, value: playlistItemAdded)
           }
-          MenuItemButton(icon: UIImage(named: "nav-share", in: .module, compatibleWith: nil)!.template, title: Strings.shareWithMenuItem) {
+          MenuItemButton(icon: Image(braveSystemName: "leo.share.macos"), title: Strings.shareWithMenuItem) {
             browserViewController.dismiss(animated: true)
             browserViewController.tabToolbarDidPressShare()
           }
           NightModeMenuButton(dismiss: {
             browserViewController.dismiss(animated: true)
           })
-          MenuItemButton(icon: UIImage(named: "menu-add-bookmark", in: .module, compatibleWith: nil)!.template, title: Strings.addToMenuItem) {
+          MenuItemButton(icon: Image(braveSystemName: "leo.browser.bookmark-add"), title: Strings.addToMenuItem) {
             browserViewController.dismiss(animated: true) {
               browserViewController.openAddBookmark()
             }
           }
-          ForEach(activities, id: \.activityTitle) { activity in
-            MenuItemButton(icon: activity.activityImage?.template ?? UIImage(), title: activity.activityTitle ?? "") {
+          ForEach(activities.compactMap({ $0 as? MenuActivity }), id: \.activityTitle) { activity in
+            MenuItemButton(icon: activity.menuImage, title: activity.activityTitle ?? "") {
               browserViewController.dismiss(animated: true) {
                 activity.perform()
               }

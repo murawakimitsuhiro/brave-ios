@@ -7,7 +7,7 @@ import Foundation
 import LocalAuthentication
 import BraveCore
 import Data
-import BraveShared
+import Preferences
 import Combine
 
 public class SettingsStore: ObservableObject {
@@ -35,6 +35,14 @@ public class SettingsStore: ObservableObject {
     }
   }
   
+  /// The current ENS Resolve Method preference (Ask / Enabled / Disabled)
+  @Published var ensResolveMethod: BraveWallet.ResolveMethod = .ask {
+    didSet {
+      guard oldValue != ensResolveMethod else { return }
+      rpcService.setEnsResolveMethod(ensResolveMethod)
+    }
+  }
+  
   /// The current ENS Offchain Resolve Method preference (Ask / Enabled / Disabled)
   @Published var ensOffchainResolveMethod: BraveWallet.ResolveMethod = .ask {
     didSet {
@@ -49,11 +57,28 @@ public class SettingsStore: ObservableObject {
       rpcService.setSnsResolveMethod(snsResolveMethod)
     }
   }
+  
+  /// The current Unstoppable Domains Resolve Method preference (Ask / Enabled / Disabled)
+  @Published var udResolveMethod: BraveWallet.ResolveMethod = .ask {
+    didSet {
+      guard oldValue != udResolveMethod else { return }
+      rpcService.setUnstoppableDomainsResolveMethod(udResolveMethod)
+    }
+  }
+  
+  /// The current preference for enabling NFT discovery (Enabled / Disabled)
+  @Published var isNFTDiscoveryEnabled: Bool = false {
+    didSet {
+      guard oldValue != isNFTDiscoveryEnabled else { return }
+      walletService.setNftDiscoveryEnabled(isNFTDiscoveryEnabled)
+    }
+  }
 
   private let keyringService: BraveWalletKeyringService
   private let walletService: BraveWalletBraveWalletService
   private let rpcService: BraveWalletJsonRpcService
   private let txService: BraveWalletTxService
+  let ipfsApi: IpfsAPI
   private let keychain: KeychainType
 
   public init(
@@ -61,12 +86,14 @@ public class SettingsStore: ObservableObject {
     walletService: BraveWalletBraveWalletService,
     rpcService: BraveWalletJsonRpcService,
     txService: BraveWalletTxService,
+    ipfsApi: IpfsAPI,
     keychain: KeychainType = Keychain()
   ) {
     self.keyringService = keyringService
     self.walletService = walletService
     self.rpcService = rpcService
     self.txService = txService
+    self.ipfsApi = ipfsApi
     self.keychain = keychain
 
     keyringService.add(self)
@@ -81,19 +108,28 @@ public class SettingsStore: ObservableObject {
       let autoLockMinutes = await keyringService.autoLockMinutes()
       self.autoLockInterval = .init(value: autoLockMinutes)
 
-      self.ensOffchainResolveMethod = await rpcService.ensOffchainLookupResolveMethod()
       self.snsResolveMethod = await rpcService.snsResolveMethod()
+      self.ensResolveMethod = await rpcService.ensResolveMethod()
+      self.ensOffchainResolveMethod = await rpcService.ensOffchainLookupResolveMethod()
+      self.udResolveMethod = await rpcService.unstoppableDomainsResolveMethod()
+      
+      self.isNFTDiscoveryEnabled = await walletService.nftDiscoveryEnabled()
     }
   }
 
   func reset() {
     walletService.reset()
+    
     keychain.resetPasswordInKeychain(key: KeyringStore.passwordKeychainKey)
     for coin in WalletConstants.supportedCoinTypes {
       Domain.clearAllWalletPermissions(for: coin)
       Preferences.Wallet.reset(for: coin)
     }
+    
     Preferences.Wallet.displayWeb3Notifications.reset()
+    Preferences.Wallet.migrateCoreToWalletUserAssetCompleted.reset()
+    
+    WalletUserAssetGroup.removeAllGroup()
   }
 
   func resetTransaction() {
@@ -151,7 +187,7 @@ extension SettingsStore: BraveWalletKeyringServiceObserver {
   public func selectedAccountChanged(_ coin: BraveWallet.CoinType) {
   }
   
-  public func accountsAdded(_ coin: BraveWallet.CoinType, addresses: [String]) {
+  public func accountsAdded(_ addedAccounts: [BraveWallet.AccountInfo]) {
   }
 }
 
@@ -178,7 +214,13 @@ extension SettingsStore: BraveWalletBraveWalletServiceObserver {
   public func onDefaultSolanaWalletChanged(_ wallet: BraveWallet.DefaultWallet) {
   }
   
+  public func onDiscoverAssetsStarted() {
+  }
+  
   public func onDiscoverAssetsCompleted(_ discoveredAssets: [BraveWallet.BlockchainToken]) {
+  }
+  
+  public func onResetWallet() {
   }
 }
 

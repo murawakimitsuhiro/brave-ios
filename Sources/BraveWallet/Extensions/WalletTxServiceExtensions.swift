@@ -10,23 +10,54 @@ extension BraveWalletTxService {
   
   // Fetches all pending transactions for all given keyrings
   func pendingTransactions(
+    chainIdsForCoin: [BraveWallet.CoinType: [String]],
     for keyrings: [BraveWallet.KeyringInfo]
   ) async -> [BraveWallet.TransactionInfo] {
-    await allTransactions(for: keyrings).filter { $0.txStatus == .unapproved }
+    await allTransactions(chainIdsForCoin: chainIdsForCoin, for: keyrings)
+      .filter { $0.txStatus == .unapproved }
   }
   
   // Fetches all transactions for all given keyrings
   func allTransactions(
+    chainIdsForCoin: [BraveWallet.CoinType: [String]],
     for keyrings: [BraveWallet.KeyringInfo]
   ) async -> [BraveWallet.TransactionInfo] {
     return await withTaskGroup(
       of: [BraveWallet.TransactionInfo].self,
       body: { @MainActor group in
         for keyring in keyrings {
-          for info in keyring.accountInfos {
-            group.addTask { @MainActor in
-              await self.allTransactionInfo(info.coin, from: info.address)
+          guard let keyringCoin = keyring.coin,
+                let chainIdsForKeyringCoin = chainIdsForCoin[keyringCoin] else {
+            continue
+          }
+          for chainId in chainIdsForKeyringCoin {
+            for info in keyring.accountInfos {
+              group.addTask { @MainActor in
+                await self.allTransactionInfo(info.coin, chainId: chainId, from: info.address)
+              }
             }
+          }
+        }
+        var allTx: [BraveWallet.TransactionInfo] = []
+        for await transactions in group {
+          allTx.append(contentsOf: transactions)
+        }
+        return allTx
+      }
+    )
+  }
+  
+  // Fetches all transactions for a given AccountInfo
+  func allTransactions(
+    networks: [BraveWallet.NetworkInfo],
+    for accountInfo: BraveWallet.AccountInfo
+  ) async -> [BraveWallet.TransactionInfo] {
+    return await withTaskGroup(
+      of: [BraveWallet.TransactionInfo].self,
+      body: { @MainActor group in
+        for network in networks {
+          group.addTask { @MainActor in
+            await self.allTransactionInfo(accountInfo.coin, chainId: network.chainId, from: accountInfo.address)
           }
         }
         var allTx: [BraveWallet.TransactionInfo] = []

@@ -230,6 +230,12 @@ extension URL {
 
     return self
   }
+  
+  public var withoutFragment: URL {
+    var components = URLComponents(url: self, resolvingAgainstBaseURL: false)
+    components?.fragment = nil
+    return components?.url ?? self
+  }
 
   public var withoutWWW: URL {
     if let normalized = self.normalizedHost(stripWWWSubdomainOnly: true),
@@ -372,7 +378,7 @@ extension URL {
                          "imdb"]
     
     let searchSiteList = ["search.brave", "google", "qwant",
-                          "startpage", "duckduckgo"]
+                          "startpage", "duckduckgo", "presearch"]
     
     let devSiteList = ["macrumors", "9to5mac", "developer.apple"]
                     
@@ -433,6 +439,11 @@ extension URL {
     }
 
     return siteList.contains(where: urlHost.contains)
+  }
+  
+  public var isPlaylistBlockedSiteURL: Bool {
+    let urlHost = self.host ?? self.hostSLD
+    return urlHost == "talk.brave.com"
   }
 
   public func uniquePathForFilename(_ filename: String) throws -> URL {

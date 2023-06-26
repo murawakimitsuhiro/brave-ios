@@ -4,17 +4,14 @@
 
 import Foundation
 import Shared
-import BraveShared
+import Preferences
 import Intents
 import BraveWidgetsModels
 
 // Used by the App to navigate to different views.
 // To open a URL use /open-url or to open a blank tab use /open-url with no params
-public enum DeepLink: Equatable {
-  public init?(urlString: String) {
-    // Currently unused for now
-    return nil
-  }
+public enum DeepLink: String {
+  case vpnCrossPlatformPromo = "vpn_promo"
 }
 
 // The root navigation for the Router. Look at the tests to see a complete URL
@@ -26,7 +23,7 @@ public enum NavigationPath: Equatable {
 
   public init?(url: URL) {
     let urlString = url.absoluteString
-    if url.scheme == "http" || url.scheme == "https" {
+    if url.scheme == "http" || url.scheme == "https" || url.isIPFSScheme {
       self = .url(webURL: url, isPrivate: PrivateBrowsingManager.shared.isPrivateBrowsing)
       return
     }
@@ -46,7 +43,7 @@ public enum NavigationPath: Equatable {
       return nil
     }
 
-    if urlString.starts(with: "\(scheme)://deep-link"), let deepURL = components.valueForQuery("url"), let link = DeepLink(urlString: deepURL) {
+    if urlString.starts(with: "\(scheme)://deep-link"), let deepURL = components.valueForQuery("path"), let link = DeepLink(rawValue: deepURL) {
       self = .deepLink(link)
     } else if urlString.starts(with: "\(scheme)://open-url") {
       let urlText = components.valueForQuery("url")
@@ -80,7 +77,10 @@ public enum NavigationPath: Equatable {
   }
 
   private static func handleDeepLink(_ link: DeepLink, with bvc: BrowserViewController) {
-    // Handle any deep links we add
+    switch link {
+    case .vpnCrossPlatformPromo:
+      bvc.presentVPNInAppEventCallout()
+    }
   }
 
   private static func handleURL(url: URL?, isPrivate: Bool, with bvc: BrowserViewController) {
@@ -128,6 +128,11 @@ public enum NavigationPath: Equatable {
       bvc.navigationHelper.openWallet()
     case .scanQRCode:
       bvc.scanQRCode()
+    case .braveNews:
+      bvc.openBlankNewTab(attemptLocationFieldFocus: false, isPrivate: false, isExternal: true)
+      bvc.popToBVC()
+      guard let newTabPageController = bvc.tabManager.selectedTab?.newTabPageViewController else { return }
+      newTabPageController.scrollToBraveNews()
     @unknown default:
       assertionFailure()
       break

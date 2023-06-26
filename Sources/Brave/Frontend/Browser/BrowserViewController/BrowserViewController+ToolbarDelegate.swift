@@ -13,6 +13,8 @@ import SwiftUI
 import BraveNews
 import os.log
 import BraveWallet
+import Preferences
+import CertificateUtilities
 
 // MARK: - TopToolbarDelegate
 
@@ -22,7 +24,9 @@ extension BrowserViewController: TopToolbarDelegate {
     if tabManager.tabsForCurrentMode.isEmpty {
       return
     }
-    updateFindInPageVisibility(visible: false)
+    if #unavailable(iOS 16.0) {
+      updateFindInPageVisibility(visible: false)
+    }
     displayPageZoom(visible: false)
 
     if tabManager.selectedTab == nil {
@@ -34,9 +38,12 @@ extension BrowserViewController: TopToolbarDelegate {
 
     isTabTrayActive = true
 
-    let tabTrayController = TabTrayController(tabManager: tabManager, braveCore: braveCore).then {
-      $0.delegate = self
-      $0.toolbarUrlActionsDelegate = self
+    let tabTrayController = TabTrayController(
+      tabManager: tabManager,
+      braveCore: braveCore,
+      windowProtection: windowProtection).then {
+        $0.delegate = self
+        $0.toolbarUrlActionsDelegate = self
     }
     let container = UINavigationController(rootViewController: tabTrayController)
 
@@ -97,6 +104,10 @@ extension BrowserViewController: TopToolbarDelegate {
         }
         
         await MainActor.run { [errorDescription] in
+          if #available(iOS 16.0, *) {
+            // System components sit on top so we want to dismiss it
+            webView.findInteraction?.dismissFindNavigator()
+          }
           let certificateViewController = CertificateViewController(certificate: certificate, evaluationError: errorDescription)
           let popover = PopoverController(contentController: certificateViewController, contentSizeBehavior: .preferredContentSize)
           popover.addsConvenientDismissalMargins = true
@@ -107,25 +118,33 @@ extension BrowserViewController: TopToolbarDelegate {
   }
 
   func topToolbarDidPressReload(_ topToolbar: TopToolbarView) {
-    let isPrivateMode = PrivateBrowsingManager.shared.isPrivateBrowsing
-    if !isPrivateMode, let url = topToolbar.currentURL, url.domainURL.schemelessAbsoluteDisplayString.endsWithSupportedSNSExtension, let rpcService = BraveWallet.JsonRpcServiceFactory.get(privateMode: isPrivateMode) {
-      Task { @MainActor in
-        let currentStatus = await rpcService.snsResolveMethod()
-        switch currentStatus {
-        case .ask:
-          // show name service interstitial page
-          showSNSDomainInterstitialPage(originalURL: url, visitType: .unknown)
-        case .enabled:
-          if let resolvedURL = await resolveSNSHost(url.schemelessAbsoluteDisplayString, rpcService: rpcService) {
-            tabManager.selectedTab?.loadRequest(URLRequest(url: resolvedURL))
-            return
-          }
-          tabManager.selectedTab?.loadRequest(URLRequest(url: url))
-        case .disabled:
-          tabManager.selectedTab?.reload()
-        @unknown default:
+    if let url = topToolbar.currentURL {
+      if url.isIPFSScheme {
+        if !handleIPFSSchemeURL(url, visitType: .unknown) {
           tabManager.selectedTab?.reload()
         }
+      } else if let decentralizedDNSHelper = decentralizedDNSHelperFor(url: topToolbar.currentURL) {
+        topToolbarDidPressReloadTask?.cancel()
+        topToolbarDidPressReloadTask = Task { @MainActor in
+          topToolbar.locationView.loading = true
+          let result = await decentralizedDNSHelper.lookup(domain: url.schemelessAbsoluteDisplayString)
+          topToolbar.locationView.loading = tabManager.selectedTab?.loading ?? false
+          guard !Task.isCancelled else { return } // user pressed stop, or typed new url
+          switch result {
+          case let .loadInterstitial(service):
+            showWeb3ServiceInterstitialPage(service: service, originalURL: url)
+          case let .load(resolvedURL):
+            if resolvedURL.isIPFSScheme {
+              handleIPFSSchemeURL(resolvedURL, visitType: .unknown)
+            } else {
+              tabManager.selectedTab?.loadRequest(URLRequest(url: resolvedURL))
+            }
+          case .none:
+            tabManager.selectedTab?.reload()
+          }
+        }
+      } else {
+        tabManager.selectedTab?.reload()
       }
     } else {
       tabManager.selectedTab?.reload()
@@ -134,6 +153,9 @@ extension BrowserViewController: TopToolbarDelegate {
 
   func topToolbarDidPressStop(_ topToolbar: TopToolbarView) {
     tabManager.selectedTab?.stop()
+    processAddressBarTask?.cancel()
+    topToolbarDidPressReloadTask?.cancel()
+    topToolbar.locationView.loading = tabManager.selectedTab?.loading ?? false
   }
 
   func topToolbarDidLongPressReloadButton(_ topToolbar: TopToolbarView, from button: UIButton) {
@@ -184,14 +206,49 @@ extension BrowserViewController: TopToolbarDelegate {
   }
 
   func topToolbarDidPressPlaylistButton(_ urlBar: TopToolbarView) {
+    guard let tab = tabManager.selectedTab, let playlistItem = tab.playlistItem else { return }
     let state = urlBar.locationView.playlistButton.buttonState
     switch state {
     case .addToPlaylist:
-      showPlaylistPopover(tab: tabManager.selectedTab, state: .addToPlaylist)
+      addToPlaylist(item: playlistItem) { [weak self] didAddItem in
+        guard let self else { return }
+        
+        if didAddItem {
+          self.updatePlaylistURLBar(tab: tab, state: .existingItem, item: playlistItem)
+          
+          DispatchQueue.main.async { [self] in
+            let popover = self.createPlaylistPopover(item: playlistItem, tab: tab)
+            popover.present(from: self.topToolbar.locationView.playlistButton, on: self)
+          }
+        }
+      }
     case .addedToPlaylist:
-      showPlaylistPopover(tab: tabManager.selectedTab, state: .addedToPlaylist)
+      // Shows its own menu
+      break
     case .none:
       break
+    }
+  }
+  
+  func topToolbarDidPressPlaylistMenuAction(_ urlBar: TopToolbarView, action: PlaylistURLBarButton.MenuAction) {
+    guard let tab = tabManager.selectedTab, let info = tab.playlistItem else { return }
+    switch action {
+    case .changeFolders:
+      guard let item = PlaylistItem.getItem(uuid: info.tagId) else { return }
+      let controller = PlaylistChangeFoldersViewController(item: item)
+      self.present(controller, animated: true)
+    case .openInPlaylist:
+      DispatchQueue.main.async {
+        self.openPlaylist(tab: tab, item: info)
+      }
+    case .remove:
+      DispatchQueue.main.async {
+        if PlaylistManager.shared.delete(item: info) {
+          self.updatePlaylistURLBar(tab: tab, state: .newItem, item: info)
+        }
+      }
+    case .undoRemove(let originalFolderUUID):
+      addToPlaylist(item: info, folderUUID: originalFolderUUID)
     }
   }
 
@@ -237,7 +294,8 @@ extension BrowserViewController: TopToolbarDelegate {
   }
 
   func processAddressBar(text: String, visitType: VisitType, isBraveSearchPromotion: Bool = false) {
-    Task { @MainActor in
+    processAddressBarTask?.cancel()
+    processAddressBarTask = Task { @MainActor in
       if !isBraveSearchPromotion, await submitValidURL(text, visitType: visitType) {
         return
       } else {
@@ -251,35 +309,67 @@ extension BrowserViewController: TopToolbarDelegate {
     }
   }
   
-  @MainActor func resolveSNSHost(_ host: String, rpcService: BraveWalletJsonRpcService) async -> URL? {
-    let (url, status, _) = await rpcService.snsResolveHost(host)
-    guard let url = url, status == .success else { return nil }
-    return url
+  @discardableResult
+  func handleIPFSSchemeURL(_ url: URL, visitType: VisitType) -> Bool {
+    guard !PrivateBrowsingManager.shared.isPrivateBrowsing else {
+      topToolbar.leaveOverlayMode()
+      if let errorPageHelper = tabManager.selectedTab?.getContentScript(name: ErrorPageHelper.scriptName) as? ErrorPageHelper, let webView = tabManager.selectedTab?.webView {
+        errorPageHelper.loadPage(IPFSErrorPageHandler.privateModeError, forUrl: url, inWebView: webView)
+      }
+      return true
+    }
+    
+    guard let ipfsPref = Preferences.Wallet.Web3IPFSOption(rawValue: Preferences.Wallet.resolveIPFSResources.value) else {
+      return false
+    }
+    
+    switch ipfsPref {
+    case .ask:
+      showIPFSInterstitialPage(originalURL: url, visitType: visitType)
+      return true
+    case .enabled:
+      if let resolvedUrl = braveCore.ipfsAPI.resolveGatewayUrl(for: url) {
+        finishEditingAndSubmit(resolvedUrl, visitType: visitType)
+        return true
+      }
+    case .disabled:
+      topToolbar.leaveOverlayMode()
+      if let errorPageHelper = tabManager.selectedTab?.getContentScript(name: ErrorPageHelper.scriptName) as? ErrorPageHelper, let webView = tabManager.selectedTab?.webView {
+        errorPageHelper.loadPage(IPFSErrorPageHandler.privateModeError, forUrl: url, inWebView: webView)
+      }
+      return true
+    }
+    
+    return false
   }
   
   @MainActor func submitValidURL(_ text: String, visitType: VisitType) async -> Bool {
-    if let fixupURL = URIFixup.getURL(text) {
+    if let url = URL(string: text), url.isIPFSScheme {
+      return handleIPFSSchemeURL(url, visitType: visitType)
+    } else if let fixupURL = URIFixup.getURL(text) {
       // Do not allow users to enter URLs with the following schemes.
       // Instead, submit them to the search engine like Chrome-iOS does.
       if !["file"].contains(fixupURL.scheme) {
-        // check text is SNS domain
-        let isPrivateMode = PrivateBrowsingManager.shared.isPrivateBrowsing
-        if !isPrivateMode, fixupURL.domainURL.schemelessAbsoluteDisplayString.endsWithSupportedSNSExtension, let rpcService = BraveWallet.JsonRpcServiceFactory.get(privateMode: isPrivateMode) {
-          let currentStatus = await rpcService.snsResolveMethod()
-          switch currentStatus {
-          case .ask:
-            // show name service interstitial page
-            showSNSDomainInterstitialPage(originalURL: fixupURL, visitType: visitType)
+        // check text is decentralized DNS supported domain
+        if let decentralizedDNSHelper = self.decentralizedDNSHelperFor(url: fixupURL) {
+          topToolbar.leaveOverlayMode()
+          updateToolbarCurrentURL(fixupURL)
+          topToolbar.locationView.loading = true
+          let result = await decentralizedDNSHelper.lookup(domain: fixupURL.schemelessAbsoluteDisplayString)
+          topToolbar.locationView.loading = tabManager.selectedTab?.loading ?? false
+          guard !Task.isCancelled else { return true } // user pressed stop, or typed new url
+          switch result {
+          case let .loadInterstitial(service):
+            showWeb3ServiceInterstitialPage(service: service, originalURL: fixupURL, visitType: visitType)
             return true
-          case .enabled:
-            if let resolvedURL = await resolveSNSHost(text, rpcService: rpcService) {
-              // resolved url
+          case let .load(resolvedURL):
+            if resolvedURL.isIPFSScheme {
+              return handleIPFSSchemeURL(resolvedURL, visitType: visitType)
+            } else {
               finishEditingAndSubmit(resolvedURL, visitType: visitType)
               return true
             }
-          case .disabled:
-            break
-          @unknown default:
+          case .none:
             break
           }
         }
@@ -349,6 +439,11 @@ extension BrowserViewController: TopToolbarDelegate {
       return
     }
 
+    if #available(iOS 16.0, *) {
+      // System components sit on top so we want to dismiss it
+      selectedTab.webView?.findInteraction?.dismissFindNavigator()
+    }
+    
     let shields = ShieldsViewController(tab: selectedTab)
     shields.shieldsSettingsChanged = { [unowned self] _, shield in
       // Update the shields status immediately
@@ -367,20 +462,42 @@ extension BrowserViewController: TopToolbarDelegate {
       // In 1.6 we "reload" the whole web view state, dumping caches, etc. (reload():BraveWebView.swift:495)
       // BRAVE TODO: Port over proper tab reloading with Shields
     }
+    
     shields.showGlobalShieldsSettings = { [unowned self] vc in
       vc.dismiss(animated: true) {
-        let shieldsAndPrivacy = BraveShieldsAndPrivacySettingsController(
+        weak var spinner: SpinnerView?
+        let controller = UIHostingController(rootView: AdvancedShieldsSettingsView(
           profile: self.profile,
           tabManager: self.tabManager,
           feedDataSource: self.feedDataSource,
           historyAPI: self.braveCore.historyAPI,
-          p3aUtilities: self.braveCore.p3aUtils
-        )
-        let container = SettingsNavigationController(rootViewController: shieldsAndPrivacy)
+          p3aUtilities: self.braveCore.p3aUtils,
+          clearDataCallback: { [weak self] isLoading in
+            guard let view = self?.navigationController?.view, view.window != nil else {
+              assertionFailure()
+              return
+            }
+            
+            if isLoading, spinner == nil {
+              let newSpinner = SpinnerView()
+              newSpinner.present(on: view)
+              spinner = newSpinner
+            } else {
+              spinner?.dismiss()
+              spinner = nil
+            }
+          }
+        ))
+        
+        controller.rootView.openURLAction = { [unowned self] url in
+          openDestinationURL(url)
+        }
+        
+        let container = SettingsNavigationController(rootViewController: controller)
         container.isModalInPresentation = true
         container.modalPresentationStyle =
           UIDevice.current.userInterfaceIdiom == .phone ? .pageSheet : .formSheet
-        shieldsAndPrivacy.navigationItem.rightBarButtonItem = .init(
+        controller.navigationItem.rightBarButtonItem = .init(
           barButtonSystemItem: .done,
           target: container,
           action: #selector(SettingsNavigationController.done)
@@ -414,10 +531,80 @@ extension BrowserViewController: TopToolbarDelegate {
   func topToolbarDidPressQrCodeButton(_ urlBar: TopToolbarView) {
     scanQRCode()
   }
+  
+  func topToolbarDidPressVoiceSearchButton(_ urlBar: TopToolbarView) {
+    Task { @MainActor in
+      let speechRecognizer = SpeechRecognizer()
+
+      onPendingRequestUpdatedCancellable = speechRecognizer.$finalizedRecognition.sink { [weak self] finalizedRecognition in
+        guard let self else { return }
+        
+        if finalizedRecognition.status {
+          stopVoiceSearch(searchQuery: finalizedRecognition.searchQuery)
+        }
+      }
+      
+      let permissionStatus = await speechRecognizer.askForUserPermission()
+          
+      if permissionStatus {
+        openVoiceSearch(speechRecognizer: speechRecognizer)
+      } else {
+        showNoMicrophoneWarning()
+      }
+    }
+    
+    func openVoiceSearch(speechRecognizer: SpeechRecognizer) {
+      // Pause active playing in PiP when Audio Search is enabled
+      if let pipMediaPlayer = PlaylistCarplayManager.shared.mediaPlayer?.pictureInPictureController?.playerLayer.player {
+        pipMediaPlayer.pause()
+      }
+      
+      voiceSearchViewController = PopupViewController(rootView: VoiceSearchInputView(speechModel: speechRecognizer))
+      
+      if let voiceSearchController = voiceSearchViewController {
+        voiceSearchController.modalTransitionStyle = .crossDissolve
+        voiceSearchController.modalPresentationStyle = .overFullScreen
+        present(voiceSearchController, animated: true)
+      }
+    }
+    
+    func showNoMicrophoneWarning() {
+      let alertController = UIAlertController(
+        title: Strings.VoiceSearch.microphoneAccessRequiredWarningTitle,
+        message: Strings.VoiceSearch.microphoneAccessRequiredWarningDescription,
+        preferredStyle: .alert)
+      
+      let settingsAction = UIAlertAction(
+        title: Strings.settings,
+        style: .default) { _ in
+          let url = URL(string: UIApplication.openSettingsURLString)!
+          UIApplication.shared.open(url, options: [:], completionHandler: nil)
+      }
+      
+      let cancelAction = UIAlertAction(title: Strings.CancelString, style: .cancel, handler: nil)
+
+      alertController.addAction(settingsAction)
+      alertController.addAction(cancelAction)
+      
+      present(alertController, animated: true)
+    }
+  }
+  
+  func stopVoiceSearch(searchQuery: String? = nil) {
+    voiceSearchViewController?.dismiss(animated: true) {
+      if let query = searchQuery {
+        self.submitSearchText(query)
+      }
+    }
+  }
 
   func topToolbarDidTapWalletButton(_ urlBar: TopToolbarView) {
     guard let selectedTab = tabManager.selectedTab else {
       return
+    }
+    if #available(iOS 16.0, *) {
+      // System components sit on top so we want to dismiss it
+      selectedTab.webView?.findInteraction?.dismissFindNavigator()
     }
     presentWalletPanel(from: selectedTab.getOrigin(), with: selectedTab.tabDappStore)
   }

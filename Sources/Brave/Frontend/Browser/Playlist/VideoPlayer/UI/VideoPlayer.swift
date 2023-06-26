@@ -189,10 +189,6 @@ class VideoView: UIView, VideoTrackerBarDelegate {
     fatalError("init(coder:) has not been implemented")
   }
 
-  deinit {
-    detachLayer()
-  }
-
   override func layoutSubviews() {
     super.layoutSubviews()
 
@@ -653,25 +649,19 @@ class VideoView: UIView, VideoTrackerBarDelegate {
           changeHandler: { [weak self] _, change in
             guard let self = self else { return }
             
-            if let tracks = change.newValue,
-               !(tracks?.isEmpty ?? true),
-               !(self.delegate?.isVideoTracksAvailable ?? true) {
-              self.particleView.alpha = 1.0
-            } else {
-              self.particleView.alpha = 0.0
+            DispatchQueue.main.async {
+              if let tracks = change.newValue,
+                 !(tracks?.isEmpty ?? true),
+                 !(self.delegate?.isVideoTracksAvailable ?? true) {
+                self.particleView.alpha = 1.0
+              } else {
+                self.particleView.alpha = 0.0
+              }
             }
           }
         )
       }
     }
-  }
-
-  func detachLayer() {
-    playerStatusObserver = nil
-
-    staticImageView.layer.removeFromSuperlayer()
-    playerLayer?.removeFromSuperlayer()
-    playerLayer?.player = nil
   }
 
   func play() {

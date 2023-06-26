@@ -14,7 +14,7 @@ import os.log
 // Third-Party
 import SDWebImage
 
-import BraveShared
+import Preferences
 import Shared
 import Data
 import SwiftUI
@@ -193,10 +193,8 @@ class PlaylistListViewController: UIViewController {
     
     // Store the last played item's time-offset
     if let playTime = delegate?.currentPlaylistItem?.currentTime(),
-      Preferences.Playlist.playbackLeftOff.value {
-      Preferences.Playlist.lastPlayedItemTime.value = playTime.seconds
-    } else {
-      Preferences.Playlist.lastPlayedItemTime.value = 0.0
+       let item = PlaylistCarplayManager.shared.currentPlaylistItem {
+      PlaylistManager.shared.updateLastPlayed(item: item, playTime: playTime.seconds)
     }
 
     onCancelEditingItems()
@@ -207,9 +205,15 @@ class PlaylistListViewController: UIViewController {
 
     folderObserver = nil
     if isMovingFromParent || isBeingDismissed {
-      delegate?.stopPlaying()
+      if !PlaylistCarplayManager.shared.isCarPlayAvailable {
+        delegate?.stopPlaying()
+      }
+      
       stopLoadingSharedPlaylist()
-      PlaylistCarplayManager.shared.onCarplayUIChangedToRoot.send()
+      
+      if !PlaylistCarplayManager.shared.isCarPlayAvailable {
+        PlaylistCarplayManager.shared.onCarplayUIChangedToRoot.send()
+      }
     }
   }
 
@@ -272,19 +276,17 @@ class PlaylistListViewController: UIViewController {
     var lastPlayedItemTime: Double = 0.0
     
     let lastPlayedItemUrl = initialItem?.pageSrc ?? Preferences.Playlist.lastPlayedItemUrl.value
-    let lastPlayedItemId = PlaylistManager.shared.allItems.first(where: { $0.pageSrc == lastPlayedItemUrl })?.tagId
+    let lastPlayedItem = PlaylistManager.shared.allItems.first(where: { $0.pageSrc == lastPlayedItemUrl })
     
     // If the user is current viewing the same video as the last played item
     // then we choose whichever time offset is more recent
-    if let pageSrc = initialItem?.pageSrc,
-       let lastPlayedItem = Preferences.Playlist.lastPlayedItemUrl.value,
-       pageSrc == lastPlayedItem {
+    if let pageSrc = initialItem?.pageSrc, let lastPlayedItem = lastPlayedItem, pageSrc == lastPlayedItem.pageSrc {
       
       // User is current on the same page as the last played item]
-      lastPlayedItemTime = max(initialItemOffset, Preferences.Playlist.lastPlayedItemTime.value)
+      lastPlayedItemTime = max(initialItemOffset, lastPlayedItem.lastPlayedOffset)
     } else {
       // Otherwise we choose the last played item offset from the page and fallback to the preference if none exists
-      lastPlayedItemTime = initialItem != nil ? initialItemOffset : Preferences.Playlist.lastPlayedItemTime.value
+      lastPlayedItemTime = initialItem != nil ? initialItemOffset : lastPlayedItem?.lastPlayedOffset ?? 0.0
     }
     
     // Auto-play is based on loading state and preference only
@@ -301,7 +303,7 @@ class PlaylistListViewController: UIViewController {
 
     // If there is no last played item, then just select the first item in the playlist
     // which will play it if auto-play is enabled.
-    guard let lastPlayedItemId = lastPlayedItemId,
+    guard let lastPlayedItemId = lastPlayedItem?.tagId,
       let index = PlaylistManager.shared.index(of: lastPlayedItemId)
     else {
       tableView.delegate?.tableView?(tableView, didSelectRowAt: IndexPath(row: 0, section: 0))
@@ -328,42 +330,13 @@ class PlaylistListViewController: UIViewController {
         return
       }
 
-      delegate.playItem(item: item) { [weak self] item, error in
-        PlaylistCarplayManager.shared.currentPlaylistItem = nil
-
-        guard let self = self,
-          let delegate = self.delegate
-        else {
-          self?.commitPlayerItemTransaction(
-            at: indexPath,
-            isExpired: false)
-          return
-        }
-
-        switch error {
-        case .cancelled:
-          self.commitPlayerItemTransaction(
-            at: indexPath,
-            isExpired: false)
-        case .other(let err):
-          Logger.module.error("\(err.localizedDescription)")
-          self.commitPlayerItemTransaction(
-            at: indexPath,
-            isExpired: false)
-          delegate.displayLoadingResourceError()
-        case .cannotLoadMedia:
-          self.commitPlayerItemTransaction(
-            at: indexPath,
-            isExpired: false)
-          delegate.displayLoadingResourceError()
-        case .expired:
-          self.commitPlayerItemTransaction(
-            at: indexPath,
-            isExpired: true)
-          delegate.displayExpiredResourceError(item: item)
-        case .none:
+      PlaylistManager.shared.playbackTask = Task { @MainActor in
+        do {
           PlaylistCarplayManager.shared.currentlyPlayingItemIndex = indexPath.row
           PlaylistCarplayManager.shared.currentPlaylistItem = item
+          
+          let item = try await delegate.playItem(item: item)
+          
           self.commitPlayerItemTransaction(
             at: indexPath,
             isExpired: false)
@@ -377,12 +350,22 @@ class PlaylistListViewController: UIViewController {
           // Even if the item was NOT previously the last played item,
           // it is now as it has begun to play
           delegate.updateLastPlayedItem(item: item)
+        } catch {
+          PlaylistCarplayManager.shared.currentPlaylistItem = nil
+          PlaylistCarplayManager.shared.currentlyPlayingItemIndex = -1
+          
+          self.commitPlayerItemTransaction(
+            at: indexPath,
+            isExpired: false)
+          
+          delegate.displayLoadingResourceError()
+          Logger.module.error("Playlist Playback Error: \(error)")
         }
       }
     }
   }
 
-  private func seekLastPlayedItem(at indexPath: IndexPath, lastPlayedItemId: String, lastPlayedTime: Double) {
+  func seekLastPlayedItem(at indexPath: IndexPath, lastPlayedItemId: String, lastPlayedTime: Double) {
     // The item can be deleted at any time,
     // so we need to guard against it and make sure the index path matches up correctly
     // If it does, we check the last played time
@@ -472,7 +455,7 @@ class PlaylistListViewController: UIViewController {
     dismiss(animated: true) {
       // Handle App Rating
       // User finished viewing the playlist list view.
-      AppReviewManager.shared.handleAppReview(for: self)
+      AppReviewManager.shared.handleAppReview(for: .revised, using: self)
     }
   }
 
